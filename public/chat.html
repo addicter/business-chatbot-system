@@ -1,0 +1,517 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <meta name="theme-color" content="#075E54" />
+  <title>Chat</title>
+  <style>
+    /* ==============================
+       WhatsApp-style design tokens
+       ============================== */
+    :root{
+      --wa-header: #075E54;     /* header bar */
+      --wa-header-2: #0a6e63;   /* subtle gradient */
+      --wa-accent: #25D366;     /* action/send */
+      --wa-bg: #ECE5DD;         /* chat wallpaper base */
+      --wa-panel: #F0F2F5;      /* composer panel */
+      --wa-incoming: #FFFFFF;   /* bot bubble */
+      --wa-outgoing: #DCF8C6;   /* user bubble */
+      --wa-text: #111B21;       /* primary text */
+      --wa-muted: #667781;      /* secondary text */
+      --wa-border: rgba(0,0,0,.08);
+      --safe-bottom: env(safe-area-inset-bottom, 0px);
+      --app-h: 100dvh;          /* mobile-dvh with JS fallback */
+      --colMax: 920px;
+    }
+    @media (prefers-color-scheme: dark){
+      :root{
+        --wa-header:#202C33; --wa-header-2:#111B21; --wa-accent:#25D366;
+        --wa-bg:#0B141A; --wa-panel:#1F2C34;
+        --wa-incoming:#1F2C34; --wa-outgoing:#005C4B;
+        --wa-text:#E9EDEF; --wa-muted:#8696A0; --wa-border:rgba(255,255,255,.08);
+      }
+    }
+
+    /* ===== Base ===== */
+    *{box-sizing:border-box}
+    html,body{height:100%}
+    body{
+      margin:0;
+      font-family: system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial;
+      color: var(--wa-text);
+      background:
+        radial-gradient(1200px 800px at -10% -20%, rgba(255,255,255,.18), transparent 60%),
+        var(--wa-bg);
+      -webkit-font-smoothing: antialiased;
+      -webkit-tap-highlight-color: transparent;
+    }
+
+    .app{
+      height: var(--app-h);
+      display:grid;
+      grid-template-rows: auto 1fr auto;
+      margin: 0 auto;
+      max-width: var(--colMax);
+      background: linear-gradient(180deg, rgba(0,0,0,.03), transparent);
+    }
+
+    /* ===== Header (WhatsApp style) ===== */
+    .hdr{
+      position: sticky; top:0; z-index:3;
+      background: linear-gradient(180deg, var(--wa-header), var(--wa-header-2));
+      color:#fff;
+      padding: calc(10px + env(safe-area-inset-top, 0px)) 14px 10px;
+      display:flex; align-items:center; gap:12px;
+    }
+    .avatar{
+      width:38px; height:38px; border-radius:999px; overflow:hidden; flex:0 0 38px;
+      background: rgba(255,255,255,.18); display:grid; place-items:center;
+    }
+    .avatar img{width:100%; height:100%; object-fit:cover}
+    .title{display:flex; flex-direction:column; min-width:0}
+    .name{
+      font-weight:700; font-size:16px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;
+    }
+    .status{font-size:12px; color:rgba(255,255,255,.85)}
+    .online-dot{display:inline-block; width:8px; height:8px; border-radius:50%; background:#3AD17E; margin-right:6px}
+
+    /* ===== Messages ===== */
+    .scroll{overflow:auto; background: repeating-linear-gradient(45deg, transparent 0 14px, rgba(0,0,0,.02) 14px 28px)}
+    .stream{ padding: 12px 12px 24px; display:flex; flex-direction:column; gap:2px }
+
+    .row{display:flex; width:100%; margin: 4px 0}
+    .row.bot{justify-content:flex-start}
+    .row.user{justify-content:flex-end}
+
+    .bubble{
+      max-width: min(75ch, 86%);
+      padding: 8px 10px 6px;
+      border-radius: 7.5px;
+      box-shadow: 0 1px 0 rgba(0,0,0,.06);
+      background: var(--wa-incoming);
+      line-height: 1.55;
+      font-size: 15px;
+      position: relative;
+      white-space: pre-wrap; word-wrap: break-word;
+      border: 1px solid var(--wa-border);
+    }
+    .row.user .bubble{
+      background: var(--wa-outgoing);
+      border-color: rgba(0,0,0,.05);
+    }
+    .meta{
+      display:inline-block; margin-left:8px; font-size:11px; color:var(--wa-muted);
+      vertical-align: bottom;
+    }
+
+    /* per-message suggestions (simple pills) */
+    .sbar{
+      display:flex; gap:8px; margin: 6px 0 0 46px; padding-right:8px; overflow:auto;
+    }
+    .chip{
+      flex:0 0 auto; padding:6px 10px; font-size:13px; border-radius:999px;
+      background:#fff; color: #111B21; border:1px solid var(--wa-border); cursor:pointer;
+    }
+    @media (prefers-color-scheme: dark){
+      .chip{ background:#0b141a; color:#E9EDEF; border-color: rgba(255,255,255,.12); }
+    }
+
+    /* ===== Composer (WhatsApp style) ===== */
+    .composer-wrap{
+      position: sticky; bottom:0; z-index:4;
+      background: linear-gradient(180deg, transparent, rgba(0,0,0,.10));
+      padding: 8px 10px calc(8px + var(--safe-bottom));
+    }
+    .composer{
+      background: var(--wa-panel);
+      border:1px solid var(--wa-border);
+      border-radius: 10px;
+      padding: 6px; display:flex; align-items:flex-end; gap:8px;
+    }
+    .input{
+      flex:1; min-height:24px; max-height:140px; overflow:auto;
+      background:#fff; border-radius: 8px; border:1px solid var(--wa-border);
+      padding: 10px 10px; color: var(--wa-text);
+    }
+    .input:focus{ outline: 2px solid rgba(37,211,102,.35) }
+    @media (prefers-color-scheme: dark){
+      .input{ background:#0B141A; color:#E9EDEF; }
+    }
+    .send{
+      width:44px; height:44px; border-radius:999px; border:0; cursor:pointer;
+      background: var(--wa-accent); color:white; display:grid; place-items:center; flex:0 0 44px;
+    }
+    .send:disabled{opacity:.6; cursor:not-allowed}
+
+    /* ===== Contact sheet (WhatsApp-like) ===== */
+    .sheet{
+      position: fixed; inset: auto 0 0 0; translate: 0 100%;
+      background: var(--wa-panel);
+      border-top:1px solid var(--wa-border);
+      border-top-left-radius: 14px; border-top-right-radius: 14px;
+      padding: 8px 12px calc(12px + var(--safe-bottom));
+      z-index: 50;
+      transition: translate .2s ease-in-out;
+    }
+    .sheet.open{ translate: 0 0; }
+    .sheet .head{ display:flex; align-items:center; justify-content:space-between; padding: 6px 2px 2px; }
+    .sheet .title{ font-weight:700; font-size:16px; }
+    .sheet .close{ appearance:none; background:transparent; border:0; color:var(--wa-muted); font-size:22px; cursor:pointer; line-height:1; }
+    .sheet .hint{ color: var(--wa-muted); font-size:12.5px; padding: 2px 2px 8px; }
+
+    .fields{ display:block; padding: 0 2px; }
+    .w-row{ padding: 10px 2px 8px; }
+    .w-label{ display:block; font-size:12px; color: var(--wa-muted); margin-bottom:2px; }
+    .w-input, .w-select, .w-text{
+      width:100%; background:transparent; color:var(--wa-text);
+      border:0; outline:0; font-size:16px; padding: 6px 0;
+      border-bottom: 1px solid var(--wa-border);
+    }
+    .w-input::placeholder, .w-text::placeholder{ color: rgba(102,119,129,.65); }
+    .w-input:focus, .w-select:focus, .w-text:focus{ border-bottom-color: var(--wa-accent); }
+    .w-submit{
+      margin-top: 12px; width:100%; height:44px; border-radius: 10px;
+      border:0; color:#fff; font-weight:700; cursor:pointer; background: var(--wa-accent);
+    }
+    .w-note{ font-size:12px; color: var(--wa-muted); padding: 8px 4px 0; }
+
+    /* ===== Typing (simple) ===== */
+    .typing{display:inline-flex; gap:4px}
+    .typing span{width:6px; height:6px; background:#B6C5CC; opacity:.5; border-radius:50%; animation:blink 1s infinite}
+    .typing span:nth-child(2){animation-delay:.15s}
+    .typing span:nth-child(3){animation-delay:.3s}
+    @keyframes blink{50%{opacity:1}}
+
+    /* ===== Utilities ===== */
+    .toBottom{
+      position: fixed; right: 16px; bottom: calc(88px + var(--safe-bottom));
+      width:40px; height:40px; border-radius:999px; border:1px solid var(--wa-border);
+      display:none; background: var(--wa-panel); color: var(--wa-text); z-index:5;
+    }
+    .toBottom.show{display:grid; place-items:center}
+
+    .hidden{display:none}
+  </style>
+</head>
+<body>
+  <div class="app">
+    <!-- Header -->
+    <header class="hdr">
+      <div class="avatar"><img id="bizLogo" alt="" class="hidden" /></div>
+      <div class="title">
+        <div class="name" id="bizName">Business</div>
+        <div class="status"><span class="online-dot"></span>Online</div>
+      </div>
+    </header>
+
+    <!-- Messages -->
+    <main class="scroll" id="scroll">
+      <div class="stream" id="stream"></div>
+    </main>
+
+    <!-- Composer -->
+    <div class="composer-wrap">
+      <div class="composer">
+        <div id="input" class="input" contenteditable="true" role="textbox" aria-multiline="true" data-placeholder="Message…"></div>
+        <button id="send" class="send" aria-label="Send">
+          <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M22 2L11 13"></path><path d="M22 2l-7 20-4-9-9-4 20-7z"></path>
+          </svg>
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- WhatsApp-like contact details sheet -->
+  <section class="sheet" id="sheet" aria-hidden="true">
+    <div class="head">
+      <div class="title">Share contact details</div>
+      <button class="close" id="sheetClose" aria-label="Close">✕</button>
+    </div>
+    <div class="hint">Only name and email are required.</div>
+
+    <div class="fields">
+      <div class="w-row">
+        <label class="w-label" for="leadName">Name *</label>
+        <input id="leadName" class="w-input" placeholder="Your name" required />
+      </div>
+      <div class="w-row">
+        <label class="w-label" for="leadEmail">Email *</label>
+        <input id="leadEmail" type="email" class="w-input" placeholder="you@example.com" required />
+      </div>
+      <div class="w-row">
+        <label class="w-label" for="leadPhone">Phone</label>
+        <input id="leadPhone" type="tel" class="w-input" placeholder="+1 555 123 4567" />
+      </div>
+      <div class="w-row">
+        <label class="w-label" for="leadInterest">Interest</label>
+        <select id="leadInterest" class="w-select">
+          <option value="" selected>Choose…</option>
+          <option>Admissions</option>
+          <option>Course Fees</option>
+          <option>Corporate Training</option>
+          <option>Other</option>
+        </select>
+      </div>
+      <div class="w-row">
+        <label class="w-label" for="leadTimeline">Timeline</label>
+        <select id="leadTimeline" class="w-select">
+          <option value="" selected>Choose…</option>
+          <option>ASAP</option>
+          <option>1–2 weeks</option>
+          <option>1–2 months</option>
+        </select>
+      </div>
+      <div class="w-row">
+        <label class="w-label" for="leadMessage">Message (optional)</label>
+        <input id="leadMessage" class="w-text" placeholder="Anything else?" />
+      </div>
+    </div>
+
+    <button class="w-submit" id="leadSend">Send</button>
+    <div class="w-note" id="leadNote"></div>
+  </section>
+
+  <button class="toBottom" id="toBottom" aria-label="Scroll to bottom">↓</button>
+
+  <script>
+    /* ===== Stable viewport for mobile toolbars ===== */
+    const setVh = () => {
+      const h = window.innerHeight || document.documentElement.clientHeight;
+      document.documentElement.style.setProperty('--app-h', h + 'px');
+    };
+    setVh(); addEventListener('resize', setVh);
+
+    const $ = s => document.querySelector(s);
+    const el = {
+      logo: $('#bizLogo'),
+      name: $('#bizName'),
+      scroll: $('#scroll'),
+      stream: $('#stream'),
+      input: $('#input'),
+      send: $('#send'),
+      toBottom: $('#toBottom'),
+      sheet: $('#sheet'),
+      sheetClose: $('#sheetClose'),
+      lead: {
+        name: $('#leadName'), email: $('#leadEmail'), phone: $('#leadPhone'),
+        interest: $('#leadInterest'), timeline: $('#leadTimeline'),
+        message: $('#leadMessage'), send: $('#leadSend'), note: $('#leadNote')
+      }
+    };
+
+    let token = null;
+    let chatHash = (location.pathname.split('/').filter(Boolean).pop() || '').trim();
+    let lastSpeaker = null;
+
+    function htmlEscape(s=''){ return s.replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c])); }
+    function mdInline(s=""){
+      // minimal inline formatting: links + inline code + *em* **strong**
+      return htmlEscape(s)
+        .replace(/`([^`]+)`/g, '<code>$1</code>')
+        .replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>')
+        .replace(/\*([^*]+)\*/g, '<em>$1</em>')
+        .replace(/(^|\s)(https?:\/\/[^\s<]+)/g, '$1<a href="$2" target="_blank" rel="noopener">$2</a>')
+        .replace(/\n/g, '<br>');
+    }
+    const timeStr = () => new Date().toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'});
+
+    function addMessage(text, who='bot', suggestions=[]){
+      const row = document.createElement('div');
+      row.className = `row ${who}`;
+      const bubble = document.createElement('div');
+      bubble.className = 'bubble';
+      bubble.innerHTML = `${mdInline(text)} <span class="meta">${timeStr()}</span>`;
+      row.appendChild(bubble);
+      el.stream.appendChild(row);
+
+      // Suggestions under bot msg
+      if (who==='bot' && Array.isArray(suggestions) && suggestions.length){
+        const bar = document.createElement('div');
+        bar.className = 'sbar';
+        suggestions.forEach(s => {
+          const chip = document.createElement('button');
+          chip.className = 'chip';
+          chip.textContent = s;
+          chip.onclick = () => { setInputText(s); sendMessage(); };
+          bar.appendChild(chip);
+        });
+        el.stream.appendChild(bar);
+      }
+
+      // group rounding: light simulation (lastSpeaker not used for complex tails)
+      lastSpeaker = who;
+      scrollToBottom(true);
+    }
+
+    function typingOn(){
+      const row = document.createElement('div');
+      row.className = 'row bot';
+      const bubble = document.createElement('div');
+      bubble.className = 'bubble';
+      bubble.innerHTML = '<span class="typing"><span></span><span></span><span></span></span> <span class="meta">' + timeStr() + '</span>';
+      row.appendChild(bubble);
+      el.stream.appendChild(row);
+      scrollToBottom(true);
+      return () => row.remove();
+    }
+
+    function scrollToBottom(smooth=false){
+      el.scroll.scrollTo({ top: el.scroll.scrollHeight, behavior: smooth ? 'smooth' : 'instant' });
+    }
+
+    // show scroll-to-bottom button
+    el.scroll.addEventListener('scroll', () => {
+      const near = el.scroll.scrollHeight - el.scroll.scrollTop - el.scroll.clientHeight < 160;
+      el.toBottom.classList.toggle('show', !near);
+    });
+    el.toBottom.addEventListener('click', () => scrollToBottom(false));
+
+    // Contenteditable handling
+    function getInputText(){
+      return el.input.innerText.replace(/\r?\n$/,'').trim();
+    }
+    function setInputText(v){
+      el.input.innerText = v;
+      placeCaretAtEnd(el.input);
+    }
+    function placeCaretAtEnd(node){
+      const range = document.createRange();
+      range.selectNodeContents(node);
+      range.collapse(false);
+      const sel = window.getSelection();
+      sel.removeAllRanges(); sel.addRange(range);
+    }
+    el.input.addEventListener('keydown', (e)=>{
+      if (e.key === 'Enter' && !e.shiftKey){
+        e.preventDefault();
+        sendMessage();
+      }
+    });
+
+    // Init session
+    async function init(){
+      if (!chatHash){ addMessage('Missing business hash in URL.'); return; }
+      try{
+        const r = await fetch('/api/chat/init', {
+          method:'POST',
+          headers:{'Content-Type':'application/json'},
+          body: JSON.stringify({ chatHash: chatHash })  // Changed from businessSlug
+        });
+        const data = await r.json();
+        if(!r.ok) throw new Error(data?.error || 'Init failed');
+        token = data.sessionToken;
+    
+        el.name.textContent = data.business?.name || 'Business';
+        if (data.business?.logo_url){ el.logo.src = data.business.logo_url; el.logo.classList.remove('hidden'); }
+    
+        addMessage(
+          data.business?.welcomeMessage || 'Hi! How can I help you today?',
+          'bot'
+        );
+      }catch(e){
+        addMessage('Init error: ' + e.message);
+      }
+    }
+
+    async function sendMessage(){
+      const text = getInputText();
+      if (!text || !token) return;
+      setInputText('');
+      addMessage(text, 'user');
+      el.send.disabled = true;
+      const stop = typingOn();
+
+      try{
+        const r = await fetch('/api/chat/message', {
+          method:'POST',
+          headers:{'Content-Type':'application/json','Authorization':'Bearer '+token},
+          body: JSON.stringify({ message: text })
+        });
+        const data = await r.json();
+        stop();
+        if(!r.ok) throw new Error(data?.error || 'Request failed');
+
+        let sugg = Array.isArray(data.suggestions) ? data.suggestions.slice(0,5) : [];
+        if (data.showContactForm) sugg.unshift('Share contact details');
+
+        addMessage(data.response || '…', 'bot', sugg);
+
+        // wire the first chip to open the sheet if applicable
+        if (data.showContactForm){
+          const sbar = el.stream.querySelector('.sbar:last-child');
+          const first = sbar?.querySelector('.chip:first-child');
+          if (first){
+            const original = first.onclick;
+            first.onclick = () => { el.sheet.classList.add('open'); if (original) original(); };
+          }
+        }
+
+      }catch(e){
+        stop();
+        addMessage('Error: ' + e.message, 'bot');
+      }finally{
+        el.send.disabled = false;
+        el.input.focus();
+      }
+    }
+
+    // Contact sheet logic
+    el.sheetClose.addEventListener('click', ()=> el.sheet.classList.remove('open'));
+    el.lead.send.addEventListener('click', async ()=>{
+      const payload = {
+        name: el.lead.name.value.trim(),
+        email: el.lead.email.value.trim(),
+        phone: el.lead.phone.value.trim(),
+        interest: el.lead.interest.value,
+        timeline: el.lead.timeline.value,
+        message: el.lead.message.value.trim()
+      };
+      if (!payload.name || !payload.email){
+        el.lead.note.textContent = 'Name and email are required.'; return;
+      }
+      el.lead.send.disabled = true; el.lead.note.textContent = 'Sending…';
+      try{
+        const r = await fetch('/api/lead/capture', {
+          method:'POST',
+          headers:{'Content-Type':'application/json','Authorization':'Bearer '+token},
+          body: JSON.stringify(payload)
+        });
+        const data = await r.json();
+        if(!r.ok) throw new Error(data?.error || 'Failed to submit');
+        el.lead.note.textContent = data.message || 'Thanks! We will reach out soon.';
+        setTimeout(()=>{ el.sheet.classList.remove('open'); el.lead.send.disabled=false; }, 900);
+      }catch(e){
+        el.lead.note.textContent = e.message;
+        el.lead.send.disabled = false;
+      }
+    });
+
+    // Send button
+    el.send.addEventListener('click', sendMessage);
+
+    // Placeholder for contenteditable
+    (function placeholderPolyfill(){
+      const ph = el.input.getAttribute('data-placeholder') || 'Message…';
+      const render = ()=>{
+        if (!el.input.textContent.trim()){
+          el.input.setAttribute('data-empty','true');
+          el.input.innerHTML = ''; // ensure empty
+          el.input.setAttribute('aria-label', ph);
+        }else{
+          el.input.removeAttribute('data-empty');
+        }
+      };
+      const css = document.createElement('style');
+      css.textContent = `.input[data-empty="true"]:before{content: attr(data-placeholder); color: rgba(0,0,0,.35); pointer-events:none}`;
+      document.head.appendChild(css);
+      el.input.setAttribute('data-placeholder', ph);
+      el.input.addEventListener('input', render);
+      render();
+    })();
+
+    init();
+  </script>
+</body>
+</html>

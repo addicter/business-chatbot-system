@@ -1,0 +1,439 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Business Chatbot Setup — Horizon UI</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;700&display=swap" rel="stylesheet">
+  <style>
+    :root{
+      --bg:#f4f7fe; --card:#ffffff; --text:#1b2559; --muted:#a3aed0;
+      --primary:#4318ff; --success:#05cd99; --warning:#ffb547; --error:#e31a1a;
+      --border:#e9ecf7; --hover:#f4f7fe; --shadow:0px 18px 40px rgba(112, 144, 176, 0.12);
+      --radius: 20px; --input-radius: 16px;
+    }
+    *{box-sizing:border-box;margin:0;padding:0}
+    body{
+      font-family: 'DM Sans', ui-sans-serif, system-ui, -apple-system, sans-serif;
+      background:var(--bg); color:var(--text); line-height:1.6;
+    }
+    .container{max-width:1000px; margin:40px auto; padding:24px}
+    .card{
+      background:var(--card); border-radius:var(--radius); padding:32px;
+      box-shadow:var(--shadow); border:1px solid var(--border);
+    }
+    .header{text-align:center; margin-bottom:40px}
+    .header h1{font-size:32px; font-weight:700; color:var(--text); margin-bottom:8px}
+    .header p{color:var(--muted); font-size:16px}
+    
+    .form-grid{display:grid; grid-template-columns:1fr 1fr; gap:24px}
+    @media (max-width:768px){.form-grid{grid-template-columns:1fr}}
+    
+    .form-group{margin-bottom:24px}
+    .form-group label{
+      display:block; font-size:14px; font-weight:500; color:var(--text);
+      margin-bottom:6px;
+    }
+    .form-input, .form-textarea, .form-select{
+      width:100%; padding:14px 20px; border-radius:var(--input-radius);
+      border:1px solid var(--border); background:var(--card);
+      font-size:14px; color:var(--text); transition:all 0.2s ease;
+    }
+    .form-input:focus, .form-textarea:focus, .form-select:focus{
+      outline:none; border-color:var(--primary);
+      box-shadow:0 0 0 4px rgba(67, 24, 255, 0.1);
+    }
+    .form-textarea{min-height:100px; resize:vertical}
+    
+    .upload-zone{
+      border:2px dashed var(--border); border-radius:var(--input-radius);
+      padding:40px 20px; text-align:center; background:var(--hover);
+      cursor:pointer; transition:all 0.3s ease; margin:24px 0;
+    }
+    .upload-zone:hover, .upload-zone.dragover{
+      border-color:var(--primary); background:rgba(67, 24, 255, 0.05);
+    }
+    .upload-zone svg{width:48px; height:48px; color:var(--muted); margin-bottom:16px}
+    .upload-text{font-size:16px; font-weight:500; color:var(--text); margin-bottom:4px}
+    .upload-subtext{font-size:14px; color:var(--muted)}
+    
+    .file-list{margin:20px 0}
+    .file-item{
+      display:flex; align-items:center; justify-content:space-between;
+      padding:12px 16px; background:var(--hover); border-radius:12px;
+      margin-bottom:8px; border:1px solid var(--border);
+    }
+    .file-info{display:flex; align-items:center; gap:12px}
+    .file-icon{width:32px; height:32px; background:var(--primary); border-radius:8px;
+               display:flex; align-items:center; justify-content:center; color:white}
+    .file-details h4{font-size:14px; font-weight:500; color:var(--text)}
+    .file-details p{font-size:12px; color:var(--muted)}
+    .file-remove{background:var(--error); color:white; border:none; border-radius:6px;
+                 width:24px; height:24px; cursor:pointer; font-size:12px}
+    
+    .btn{
+      padding:14px 32px; border-radius:var(--input-radius); border:none;
+      font-size:14px; font-weight:500; cursor:pointer; transition:all 0.2s ease;
+      display:inline-flex; align-items:center; gap:8px;
+    }
+    .btn-primary{background:var(--primary); color:white}
+    .btn-primary:hover{background:#3311cc; transform:translateY(-1px)}
+    .btn-success{background:var(--success); color:white}
+    .btn-success:hover{background:#04b085}
+    
+    .alert{padding:16px 20px; border-radius:12px; margin:20px 0; font-size:14px}
+    .alert-success{background:#f0fdf9; border:1px solid #bbf7d0; color:#15803d}
+    .alert-error{background:#fef2f2; border:1px solid #fecaca; color:#dc2626}
+    .alert-info{background:#f0f9ff; border:1px solid #bae6fd; color:#0369a1}
+    
+    .divider{height:1px; background:var(--border); margin:32px 0}
+    
+    .feature-list{display:grid; grid-template-columns:repeat(auto-fit, minmax(200px, 1fr)); gap:16px; margin:24px 0}
+    .feature{
+      background:var(--hover); padding:20px; border-radius:12px;
+      text-align:center; border:1px solid var(--border);
+    }
+    .feature-icon{font-size:24px; margin-bottom:8px}
+    .feature-title{font-size:14px; font-weight:500; color:var(--text)}
+    
+    .loading{display:none; text-align:center; padding:40px}
+    .spinner{
+      width:40px; height:40px; border:4px solid var(--border);
+      border-top:4px solid var(--primary); border-radius:50%;
+      animation:spin 1s linear infinite; margin:0 auto 16px;
+    }
+    @keyframes spin{0%{transform:rotate(0deg)} 100%{transform:rotate(360deg)}}
+    
+    .results{margin-top:32px}
+    .result-card{
+      background:var(--hover); border:1px solid var(--border);
+      border-radius:12px; padding:20px; margin-bottom:16px;
+    }
+    .result-success{border-left:4px solid var(--success)}
+    .result-error{border-left:4px solid var(--error)}
+    
+    .url-display{
+      background:var(--card); border:1px solid var(--border);
+      border-radius:8px; padding:12px; font-family:monospace;
+      font-size:13px; margin:8px 0; word-break:break-all;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="card">
+      <div class="header">
+        <h1>Business Chatbot Setup</h1>
+        <p>Create your business profile and upload documents in one streamlined process</p>
+      </div>
+
+      <form id="setupForm" enctype="multipart/form-data">
+        <!-- Business Information -->
+        <div class="form-grid">
+          <div class="form-group">
+            <label for="name">Business Name *</label>
+            <input id="name" class="form-input" required placeholder="Acme Coaching Institute" />
+          </div>
+          <div class="form-group">
+            <label for="slug">URL Slug * <small>(letters, numbers, hyphens only)</small></label>
+            <input id="slug" class="form-input" required pattern="[a-z0-9-]+" placeholder="acme-coaching"/>
+          </div>
+        </div>
+
+        <div class="form-group">
+          <label for="description">Business Description</label>
+          <textarea id="description" class="form-textarea" placeholder="Brief description of your business and services..."></textarea>
+        </div>
+
+        <div class="form-grid">
+          <div class="form-group">
+            <label for="email">Business Email</label>
+            <input id="email" type="email" class="form-input" placeholder="contact@acme-coaching.com" />
+          </div>
+          <div class="form-group">
+            <label for="phone">Phone Number</label>
+            <input id="phone" type="tel" class="form-input" placeholder="+91-9876543210" />
+          </div>
+        </div>
+
+        <div class="form-group">
+          <label for="address">Address</label>
+          <input id="address" class="form-input" placeholder="123 Main Street, City, State" />
+        </div>
+
+        <div class="form-grid">
+          <div class="form-group">
+            <label for="website">Website URL</label>
+            <input id="website" type="url" class="form-input" placeholder="https://acme-coaching.com" />
+          </div>
+          <div class="form-group">
+            <label for="hours">Business Hours</label>
+            <input id="hours" class="form-input" placeholder="Mon-Fri 9AM-6PM, Sat 10AM-2PM" />
+          </div>
+        </div>
+
+        <div class="form-group">
+          <label for="maps">Google Maps URL</label>
+          <input id="maps" type="url" class="form-input" placeholder="https://maps.google.com/?q=Your+Business+Name" />
+        </div>
+
+        <div class="form-grid">
+          <div class="form-group">
+            <label for="primaryColor">Brand Color</label>
+            <input id="primaryColor" type="color" class="form-input" value="#4318ff" />
+          </div>
+          <div class="form-group">
+            <label for="logoUrl">Logo URL (Optional)</label>
+            <input id="logoUrl" type="url" class="form-input" placeholder="https://example.com/logo.png" />
+          </div>
+        </div>
+
+        <div class="form-group">
+          <label for="welcomeMessage">Welcome Message</label>
+          <textarea id="welcomeMessage" class="form-textarea" placeholder="Hi! Welcome to Acme Coaching. How can I help you today?"></textarea>
+        </div>
+
+        <div class="feature-list">
+          <div class="feature">
+            <div class="feature-icon">🔐</div>
+            <div class="feature-title">Secure Hash URLs</div>
+          </div>
+          <div class="feature-icon">📧</div>
+            <div class="feature-title">Email Notifications</div>
+          </div>
+          <div class="feature">
+            <div class="feature-icon">🎯</div>
+            <div class="feature-title">Lead Capture</div>
+          </div>
+          <div class="feature">
+            <div class="feature-icon">📊</div>
+            <div class="feature-title">Analytics Dashboard</div>
+          </div>
+        </div>
+
+        <div class="divider"></div>
+
+        <!-- File Upload Section -->
+        <h3 style="margin-bottom:16px; font-size:20px; font-weight:600;">Upload Business Documents</h3>
+        <p style="color:var(--muted); margin-bottom:24px;">Upload PDFs, Excel sheets, Word documents, or text files containing your business information, course details, pricing, policies, etc.</p>
+
+        <div class="upload-zone" id="uploadZone">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4M17 8l-5-5-5 5M12 3v12"/>
+          </svg>
+          <div class="upload-text">Drag and drop files here</div>
+          <div class="upload-subtext">or click to browse • PDF, Excel, Word, CSV, TXT • Max 10MB each</div>
+          <input type="file" id="fileInput" multiple accept=".pdf,.csv,.xlsx,.xls,.docx,.txt" style="display:none" />
+        </div>
+
+        <div id="fileList" class="file-list"></div>
+
+        <div style="display:flex; gap:16px; justify-content:center; margin-top:32px;">
+          <button type="submit" class="btn btn-primary">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M22 11.08V12a10 10 0 11-5.93-9.14"/>
+              <path d="M22 4L12 14.01l-3-3"/>
+            </svg>
+            Create Business & Upload Files
+          </button>
+        </div>
+      </form>
+
+      <div id="loading" class="loading">
+        <div class="spinner"></div>
+        <p>Creating your business chatbot and processing files...</p>
+      </div>
+
+      <div id="results" class="results" style="display:none;"></div>
+    </div>
+  </div>
+
+  <script>
+    let selectedFiles = [];
+    const $ = selector => document.querySelector(selector);
+
+    // File upload handling
+    const uploadZone = $('#uploadZone');
+    const fileInput = $('#fileInput');
+    const fileList = $('#fileList');
+
+    uploadZone.onclick = () => fileInput.click();
+
+    uploadZone.ondragover = (e) => {
+      e.preventDefault();
+      uploadZone.classList.add('dragover');
+    };
+
+    uploadZone.ondragleave = () => {
+      uploadZone.classList.remove('dragover');
+    };
+
+    uploadZone.ondrop = (e) => {
+      e.preventDefault();
+      uploadZone.classList.remove('dragover');
+      handleFiles(e.dataTransfer.files);
+    };
+
+    fileInput.onchange = (e) => {
+      handleFiles(e.target.files);
+    };
+
+    function handleFiles(files) {
+      selectedFiles = [...selectedFiles, ...Array.from(files)];
+      renderFileList();
+    }
+
+    function renderFileList() {
+      fileList.innerHTML = selectedFiles.map((file, index) => `
+        <div class="file-item">
+          <div class="file-info">
+            <div class="file-icon">📄</div>
+            <div class="file-details">
+              <h4>${file.name}</h4>
+              <p>${(file.size / (1024 * 1024)).toFixed(2)} MB</p>
+            </div>
+          </div>
+          <button type="button" class="file-remove" onclick="removeFile(${index})">×</button>
+        </div>
+      `).join('');
+    }
+
+    function removeFile(index) {
+      selectedFiles.splice(index, 1);
+      renderFileList();
+    }
+
+    function showAlert(message, type = 'info') {
+      const alert = document.createElement('div');
+      alert.className = `alert alert-${type}`;
+      alert.textContent = message;
+      $('#results').appendChild(alert);
+      setTimeout(() => alert.remove(), 5000);
+    }
+
+    // Form submission
+    $('#setupForm').onsubmit = async (e) => {
+      e.preventDefault();
+      
+      const formData = new FormData();
+      
+      // Business data
+      const businessData = {
+        slug: $('#slug').value.toLowerCase().replace(/[^a-z0-9-]/g, ''),
+        name: $('#name').value,
+        description: $('#description').value,
+        email: $('#email').value,
+        phone: $('#phone').value,
+        address: $('#address').value,
+        website: $('#website').value,
+        hours: $('#hours').value,
+        maps_url: $('#maps').value,
+        primary_color: $('#primaryColor').value,
+        logo_url: $('#logoUrl').value,
+        welcome_message: $('#welcomeMessage').value || 'Hi! How can I help you today?',
+        enable_email_notifications: true,
+        enable_lead_capture: true
+      };
+      
+      formData.append('businessData', JSON.stringify(businessData));
+      
+      // Add files
+      selectedFiles.forEach(file => {
+        formData.append('files', file);
+      });
+      
+      // Show loading
+      $('#setupForm').style.display = 'none';
+      $('#loading').style.display = 'block';
+      $('#results').style.display = 'block';
+      
+      try {
+        const response = await fetch('/admin/business/create-and-upload', {
+          method: 'POST',
+          body: formData
+        });
+        
+        const result = await response.json();
+        
+        if (result.success) {
+          $('#results').innerHTML = `
+            <div class="result-card result-success">
+              <h3 style="color:var(--success); margin-bottom:16px;">✅ Success! Your business chatbot is ready</h3>
+              
+              <div style="margin:20px 0;">
+                <h4 style="margin-bottom:8px;">🔐 Secure URLs (Save These!):</h4>
+                <p><strong>Chat URL:</strong></p>
+                <div class="url-display">${result.urls.chatUrl}</div>
+                <p><strong>Analytics URL:</strong></p>
+                <div class="url-display">${result.urls.analyticsUrl}</div>
+              </div>
+              
+              <div style="margin:20px 0;">
+                <h4 style="margin-bottom:8px;">📊 Upload Results:</h4>
+                <p>Files processed: ${result.upload.filesProcessed}/${result.upload.totalFiles}</p>
+                <p>AI chunks created: ${result.upload.totalChunks}</p>
+              </div>
+              
+              <div style="display:flex; gap:12px; margin-top:20px;">
+                <a href="${result.urls.chatUrl}" target="_blank" class="btn btn-primary">Test Chat</a>
+                <a href="${result.urls.analyticsUrl}" target="_blank" class="btn btn-success">View Analytics</a>
+              </div>
+            </div>
+          `;
+          
+          if (result.upload.results && result.upload.results.length > 0) {
+            const fileResults = result.upload.results.map(file => `
+              <div class="result-card ${file.status === 'success' ? 'result-success' : 'result-error'}">
+                <strong>${file.filename}</strong> - ${file.status}
+                ${file.chunks ? `<br><small>Created ${file.chunks} AI chunks, Category: ${file.category}</small>` : ''}
+                ${file.error ? `<br><small>Error: ${file.error}</small>` : ''}
+              </div>
+            `).join('');
+            
+            $('#results').innerHTML += `
+              <div style="margin-top:24px;">
+                <h4>File Processing Details:</h4>
+                ${fileResults}
+              </div>
+            `;
+          }
+          
+        } else {
+          $('#results').innerHTML = `
+            <div class="result-card result-error">
+              <h3 style="color:var(--error);">❌ Error</h3>
+              <p>${result.error || 'Unknown error occurred'}</p>
+            </div>
+          `;
+        }
+        
+      } catch (error) {
+        console.error('Setup error:', error);
+        $('#results').innerHTML = `
+          <div class="result-card result-error">
+            <h3 style="color:var(--error);">❌ Connection Error</h3>
+            <p>Please check your internet connection and try again.</p>
+          </div>
+        `;
+      } finally {
+        $('#loading').style.display = 'none';
+      }
+    };
+
+    // Auto-generate slug from business name
+    $('#name').oninput = (e) => {
+      if (!$('#slug').value) {
+        const slug = e.target.value
+          .toLowerCase()
+          .replace(/[^a-z0-9\s-]/g, '')
+          .replace(/\s+/g, '-')
+          .replace(/-+/g, '-')
+          .slice(0, 50);
+        $('#slug').value = slug;
+      }
+    };
+  </script>
+</body>
+</html>

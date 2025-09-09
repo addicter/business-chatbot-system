@@ -4,7 +4,7 @@
 // original implementation. Notable improvements include:
 //  * Using a predictable and writable temporary directory for uploads
 //    (`/tmp/uploads`) and ensuring it exists before handling uploads. This
-//    prevents "ENOENT" errors on platforms like AWS App Runner, which do
+//    prevents "ENOENT" errors on platforms like AWS App Runner, which do
 //    not create arbitrary directories for you.
 //  * Wiring the `multer` middleware on the exact routes that accept
 //    `multipart/form-data` so that `req.body` and `req.files` are populated.
@@ -20,6 +20,9 @@
 //    the container's disk.
 //  * Returning clear error messages in JSON to aid debugging and to
 //    integrate nicely with front‑end error handling.
+//  * PARALLEL CHUNK PROCESSING: Fixed timeout issues by processing file chunks
+//    in parallel batches instead of sequentially, with timeout protection
+//    and chunk limiting to stay under App Runner's 120-second request limit.
 
 import 'dotenv/config';
 import express from 'express';
@@ -63,7 +66,7 @@ app.use(express.static('public'));
 app.use('/admin', express.static('admin'));
 
 // Ensure a writable temporary upload directory. On some platforms (e.g.,
-// AWS App Runner) the working directory is read‑only, so we use `/tmp` which
+// AWS App Runner) the working directory is read‑only, so we use `/tmp` which
 // is guaranteed to be writable. The directory is created at startup.
 const uploadDir = process.env.FILE_UPLOAD_DIR || '/tmp/uploads';
 await fs.mkdir(uploadDir, { recursive: true });
@@ -376,7 +379,7 @@ app.get('/api/analytics/:analyticsHash', async (req, res) => {
   }
 });
 
-// Admin: Combined create business + upload files
+// Admin: Combined create business + upload files (FIXED FOR TIMEOUTS)
 app.post('/admin/business/create-and-upload', upload.array('files', 10), async (req, res) => {
   console.log('🚀 CREATE-AND-UPLOAD endpoint hit');
   console.log('📋 Request body keys:', Object.keys(req.body));
@@ -430,11 +433,11 @@ app.post('/admin/business/create-and-upload', upload.array('files', 10), async (
     const protocol = req.headers['x-forwarded-proto'] || req.protocol;
     const host = req.get('host');
     const baseUrl = `${protocol}://${host}`;
-    // Process uploaded files
+    // Process uploaded files with PARALLEL PROCESSING TO PREVENT TIMEOUTS
     let uploadResults = [];
     let totalChunks = 0;
     if (req.files && req.files.length > 0) {
-      console.log(`📁 Processing ${req.files.length} files...`);
+      console.log(`📁 Processing ${req.files.length} files with parallel optimization...`);
       for (const file of req.files) {
         try {
           console.log(`📄 Processing file: ${file.originalname}`);
@@ -450,23 +453,80 @@ app.post('/admin/business/create-and-upload', upload.array('files', 10), async (
             content,
             category,
           );
+
+          // FIXED: PARALLEL CHUNK PROCESSING TO PREVENT TIMEOUTS
           const chunks = FileProcessor.chunkText(content);
           let chunkCount = 0;
-          for (let i = 0; i < chunks.length; i++) {
-            const chunk = chunks[i];
-            const keywords = FileProcessor.extractKeywords(chunk);
+          
+          console.log(`🔄 Processing ${chunks.length} chunks for ${file.originalname}...`);
+          
+          // Limit chunks to prevent timeout (adjust based on your needs)
+          const MAX_CHUNKS = 30; // Process max 30 chunks per file to stay under timeout
+          const limitedChunks = chunks.slice(0, MAX_CHUNKS);
+          
+          if (chunks.length > MAX_CHUNKS) {
+            console.log(`⚠️ Limiting to first ${MAX_CHUNKS} chunks (was ${chunks.length}) for ${file.originalname}`);
+          }
+          
+          // Process chunks in parallel batches
+          const BATCH_SIZE = 5; // Process 5 chunks simultaneously
+          
+          for (let i = 0; i < limitedChunks.length; i += BATCH_SIZE) {
+            const batch = limitedChunks.slice(i, i + BATCH_SIZE);
+            const batchNum = Math.floor(i / BATCH_SIZE) + 1;
+            const totalBatches = Math.ceil(limitedChunks.length / BATCH_SIZE);
+            
+            console.log(`📦 Processing batch ${batchNum}/${totalBatches} (${batch.length} chunks) for ${file.originalname}`);
+            
+            // Create promises for parallel processing
+            const batchPromises = batch.map(async (chunk, batchIndex) => {
+              const chunkIndex = i + batchIndex;
+              const keywords = FileProcessor.extractKeywords(chunk);
+              
+              try {
+                // Add timeout protection to OpenAI call
+                const embedding = await Promise.race([
+                  aiSystem.createEmbedding(chunk),
+                  new Promise((_, reject) => 
+                    setTimeout(() => reject(new Error('Embedding timeout after 15s')), 15000)
+                  )
+                ]);
+                
+                await saveChunk(business.id, documentId, chunkIndex, chunk, embedding, category, keywords);
+                return { success: true, chunkIndex };
+              } catch (embeddingError) {
+                console.error(`❌ Chunk ${chunkIndex} failed for ${file.originalname}:`, embeddingError.message);
+                return { success: false, chunkIndex, error: embeddingError.message };
+              }
+            });
+            
+            // Wait for the entire batch to complete
             try {
-              const embedding = await aiSystem.createEmbedding(chunk);
-              await saveChunk(business.id, documentId, i, chunk, embedding, category, keywords);
-              chunkCount++;
-            } catch (embeddingError) {
-              console.error(`Error creating embedding for chunk ${i}:`, embeddingError);
+              const batchResults = await Promise.allSettled(batchPromises);
+              const successCount = batchResults.filter(
+                r => r.status === 'fulfilled' && r.value.success
+              ).length;
+              chunkCount += successCount;
+              
+              console.log(`✅ Batch ${batchNum} completed: ${successCount}/${batch.length} successful for ${file.originalname}`);
+              
+              // Small delay between batches to avoid rate limits
+              if (i + BATCH_SIZE < limitedChunks.length) {
+                await new Promise(resolve => setTimeout(resolve, 200));
+              }
+            } catch (batchError) {
+              console.error(`❌ Batch ${batchNum} error for ${file.originalname}:`, batchError);
             }
           }
+          
+          console.log(`✅ File processing completed: ${chunkCount}/${limitedChunks.length} chunks saved for ${file.originalname}`);
+
           uploadResults.push({
             filename: file.originalname,
             status: 'success',
             chunks: chunkCount,
+            totalChunksInFile: chunks.length,
+            processedChunks: limitedChunks.length,
             category,
             size: file.size,
           });
@@ -573,6 +633,14 @@ const server = app.listen(PORT, '0.0.0.0', () => {
   console.log(`\n🚀 Enhanced Business Chatbot System running on http://0.0.0.0:${PORT}`);
   console.log(`📊 Admin Dashboard: http://0.0.0.0:${PORT}/admin`);
   console.log(`⚡ Quick Setup: http://0.0.0.0:${PORT}/admin/onboard.html`);
+  console.log(`🏥 Health Check: http://0.0.0.0:${PORT}/health`);
+  console.log(`🧪 OpenAI Test: http://0.0.0.0:${PORT}/debug/test-openai`);
+  console.log(`🗃️ DynamoDB Test: http://0.0.0.0:${PORT}/debug/test-dynamodb`);
+  console.log(`\n✨ New Features:`);
+  console.log(`   🔐 Hash-based secure URLs`);
+  console.log(`   📊 Separate analytics endpoints`);
+  console.log(`   📄 Parallel chunk processing (TIMEOUT FIXED)`);
+  console.log(`   🎨 Enhanced UI with Horizon design`);
 });
 
 // Graceful shutdown

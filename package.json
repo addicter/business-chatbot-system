@@ -9,7 +9,8 @@
     "seed": "node scripts/seed.mjs"
   },
   "dependencies": {
-    "better-sqlite3": "^9.4.0",
+    "@aws-sdk/client-dynamodb": "^3.490.0",
+    "@aws-sdk/lib-dynamodb": "^3.490.0",
     "cors": "^2.8.5",
     "csv-parser": "^3.0.0",
     "dotenv": "^16.4.5",

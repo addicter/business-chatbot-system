@@ -1,385 +1,426 @@
-import React, { useEffect, useId, useRef, useState } from "react";
-import { motion, AnimatePresence } from "framer-motion";
-
-/**
- * Business Onboarding — Modern React Redesign (2025)
- * - Single-column layout (Carbon DS, NN/g-aligned)
- * - Accessible drag-and-drop with keyboard & input fallback (WCAG 2.2 SC 2.5.7)
- * - Inline validation with helper/error text (Material 3 guidance)
- * - ARIA live regions for status & errors
- * - Dark-mode friendly, soft gradients, subtle microinteractions
- * - Preserves your API: POST /admin/business/create-and-upload
- *
- * Requirements: TailwindCSS + Framer Motion (both available in ChatGPT canvas runtime)
- */
-
-// --- Utility helpers ---
-const ACCEPTED_EXTS = ["pdf","csv","txt","docx","xlsx","xls"]; // keep in sync with server
-const MAX_TOTAL_MB = 50; // tweak as needed
-
-function bytesToMB(bytes) { return Math.round((bytes / (1024*1024)) * 10) / 10; }
-function fileExt(name) { const m = name.toLowerCase().match(/\.([a-z0-9]+)$/); return m ? m[1] : ""; }
-function cx(...classes){ return classes.filter(Boolean).join(" "); }
-
-export default function BusinessOnboarding() {
-  const formId = useId();
-  const [name, setName] = useState("");
-  const [slug, setSlug] = useState("");
-  const [email, setEmail] = useState("");
-  const [files, setFiles] = useState([]); // {file, id, error}
-  const [status, setStatus] = useState(""); // human-readable
-  const [statusType, setStatusType] = useState(""); // success | error | info
-  const [submitting, setSubmitting] = useState(false);
-  const liveRef = useRef(null);
-
-  // Derived validations
-  const nameError = name.trim() === "" ? "Business name is required." : "";
-  const slugError = slug.trim() === "" ? "Slug is required." : (!/^[-a-z0-9]+$/i.test(slug) ? "Use only letters, numbers, and hyphens." : "");
-  const emailError = email && !/^\S+@\S+\.\S+$/.test(email) ? "Enter a valid email." : "";
-
-  const totalSizeMB = files.reduce((acc, f) => acc + bytesToMB(f.file.size), 0);
-  const totalSizeError = totalSizeMB > MAX_TOTAL_MB ? `Total size ${totalSizeMB}MB exceeds ${MAX_TOTAL_MB}MB.` : "";
-
-  useEffect(() => {
-    if (status && liveRef.current) {
-      // Move focus to live region for SRs without stealing for keyboard users
-      liveRef.current.setAttribute("aria-live", statusType === "error" ? "assertive" : "polite");
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Business Onboarding</title>
+  <style>
+    :root{
+      --bg1:#f8fafc; --bg2:#eef2f7; --card:#ffffff; --text:#0f172a; --muted:#475569;
+      --border:#e2e8f0; --border-strong:#cbd5e1; --primary:#4f46e5; --accent:#10b981;
+      --danger:#ef4444; --ring:rgba(79,70,229,.25); --shadow:0 8px 24px rgba(15,23,42,.06);
+      --rounded-lg:16px; --rounded-md:12px; --rounded-sm:10px;
     }
-  }, [status, statusType]);
-
-  function announce(message, type = "info") {
-    setStatus(message);
-    setStatusType(type);
-  }
-
-  function onAddFiles(fileList) {
-    const newItems = [];
-    const errors = [];
-    for (const f of fileList) {
-      if (f.size === 0) { errors.push(`${f.name} is empty.`); continue; }
-      const ext = fileExt(f.name);
-      if (!ACCEPTED_EXTS.includes(ext)) { errors.push(`${f.name}: .${ext || "(no ext)"} not allowed.`); continue; }
-      newItems.push({ file: f, id: `${f.name}-${f.size}-${Date.now()}-${Math.random().toString(36).slice(2)}` });
-    }
-    if (errors.length) announce(errors.join("\n"), "error");
-    if (newItems.length) setFiles(prev => [...prev, ...newItems]);
-  }
-
-  function onDrop(e){
-    e.preventDefault();
-    if (submitting) return;
-    const dt = e.dataTransfer;
-    if (dt?.files && dt.files.length) onAddFiles(dt.files);
-  }
-
-  function onKeyDropzone(e){
-    if (e.key === "Enter" || e.key === " ") {
-      // Trigger hidden input
-      document.getElementById(`${formId}-file-input`)?.click();
-    }
-  }
-
-  function removeFile(id){ setFiles(prev => prev.filter(f => f.id !== id)); }
-  function clearAll(){ setFiles([]); }
-
-  async function handleSubmit(e){
-    e.preventDefault();
-    announce("", "info");
-
-    // basic client validation
-    if (nameError || slugError || emailError || totalSizeError) {
-      announce("Please fix validation errors before submitting.", "error");
-      return;
-    }
-    if (files.length === 0) { announce("Please add at least one file.", "error"); return; }
-
-    setSubmitting(true);
-    try {
-      const fd = new FormData();
-      const businessData = { name: name.trim(), slug: slug.trim(), email: email.trim() };
-      fd.append("businessData", JSON.stringify(businessData));
-      for (const {file} of files) fd.append("files", file, file.name);
-
-      const res = await fetch("/admin/business/create-and-upload", { method: "POST", body: fd });
-      const text = await res.text();
-      let data = null;
-      try { data = JSON.parse(text); } catch { /* leave null */ }
-
-      if (!res.ok || !data || !data.success) {
-        const error = data?.error || text || `HTTP ${res.status}`;
-        throw new Error(error);
+    @media (prefers-color-scheme: dark){
+      :root{ --bg1:#0b1220; --bg2:#0a0f1a; --card:#0d1628; --text:#e6eefc; --muted:#c3d0e6;
+             --border:#1e2a44; --border-strong:#263556; --ring:rgba(99,102,241,.35);
+             --shadow:0 8px 24px rgba(0,0,0,.35);
       }
-
-      const chatUrl = data.urls?.chatUrl;
-      const analyticsUrl = data.urls?.analyticsUrl;
-      const filesProcessed = data.upload?.filesProcessed ?? 0;
-      announce(`Success! Processed ${filesProcessed} file${filesProcessed === 1 ? "" : "s"}.`, "success");
-
-      // Present result inline
-      setResult({ chatUrl, analyticsUrl, filesProcessed });
-      // Optional: clear files after success
-      // clearAll();
-    } catch (err) {
-      announce(`Upload failed: ${err.message}`, "error");
-    } finally {
-      setSubmitting(false);
     }
-  }
+    *{box-sizing:border-box}
+    html,body{height:100%}
+    body{
+      margin:0; font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Ubuntu, "Helvetica Neue", Arial;
+      color:var(--text);
+      background:linear-gradient(180deg,var(--bg1),var(--bg2));
+      padding:24px;
+    }
+    .wrap{max-width:880px;margin:0 auto}
+    /* Header card */
+    .hero{
+      position:relative;
+      border:1px solid var(--border);
+      background:color-mix(in oklab,var(--card), transparent 0%);
+      border-radius:var(--rounded-lg);
+      padding:24px;
+      box-shadow:var(--shadow);
+      overflow:hidden;
+    }
+    .hero h1{margin:0;font-size:28px;letter-spacing:-.01em}
+    .hero p{margin:6px 0 0;color:var(--muted);font-size:14px}
 
-  const [result, setResult] = useState(null);
+    .bubble{
+      position:absolute; filter:blur(28px); opacity:.5; pointer-events:none;
+    }
+    .b1{right:-90px; top:-90px; width:210px; height:210px; border-radius:999px; background:radial-gradient(120px 120px at 60% 40%, #5b7cfa55, #34d39933 60%, transparent 70%)}
+    .b2{left:-70px; bottom:-110px; width:180px; height:180px; border-radius:999px; background:radial-gradient(100px 100px at 60% 40%, #38bdf855, #a78bfa33 60%, transparent 70%)}
 
-  return (
-    <div className="min-h-screen bg-gradient-to-b from-slate-50 to-slate-100 dark:from-slate-950 dark:to-slate-900 text-slate-900 dark:text-slate-100 py-10 px-4">
-      <div className="mx-auto max-w-3xl">
-        <Header />
-        <motion.div layout className="mt-6">
-          <form onSubmit={handleSubmit} noValidate className="">
-            <Card>
-              <SectionTitle title="Business details" subtitle="Create the business profile you'll upload documents into." />
-              <div className="mt-6 space-y-5">
-                <Field
-                  id={`${formId}-name`}
-                  label="Business name"
-                  required
-                  value={name}
-                  onChange={setName}
-                  error={nameError}
-                  placeholder="Acme Corp"
-                  help="The display name your team will see."
-                />
-                <Field
-                  id={`${formId}-slug`}
-                  label="Slug"
-                  required
-                  value={slug}
-                  onChange={setSlug}
-                  error={slugError}
-                  placeholder="acme-corp"
-                  help="Unique identifier (letters, numbers, dashes)."
-                />
-                <Field
-                  id={`${formId}-email`}
-                  type="email"
-                  label="Contact email"
-                  value={email}
-                  onChange={setEmail}
-                  error={emailError}
-                  placeholder="ops@acme.com"
-                  optional
-                />
-              </div>
-            </Card>
+    .card{
+      border:1px solid var(--border);
+      background:var(--card);
+      border-radius:var(--rounded-lg);
+      padding:20px;
+      margin-top:18px;
+      box-shadow:var(--shadow);
+    }
+    .title{font-weight:600;font-size:18px;margin:0}
+    .subtitle{margin:6px 0 0;color:var(--muted);font-size:14px}
 
-            <Card className="mt-6">
-              <SectionTitle title="Documents" subtitle="Drag & drop or pick files. We accept PDF, CSV, TXT, DOCX, XLSX, XLS." />
+    .grid{display:grid; gap:16px}
+    .field label{
+      display:block; font-size:14px; font-weight:600; margin-bottom:6px;
+    }
+    .req{color:var(--danger);margin-left:4px}
+    .opt{color:var(--muted);font-weight:500;margin-left:6px}
+    .input{
+      width:100%; padding:10px 12px; border:1px solid var(--border-strong);
+      border-radius:12px; background:var(--card); color:var(--text); outline:none;
+      transition: box-shadow .15s, border-color .15s;
+    }
+    .input:focus{ box-shadow:0 0 0 6px var(--ring); border-color:var(--primary) }
+    .help{margin:6px 0 0; font-size:12px; color:var(--muted)}
+    .error{margin:6px 0 0; font-size:12px; color:var(--danger)}
+    .input[aria-invalid="true"]{ border-color:var(--danger) }
+    .text-sm{font-size:13px}
+    .muted{color:var(--muted)}
 
-              <div
-                role="group"
-                aria-labelledby={`${formId}-docs-label`}
-                className="mt-4"
-              >
-                <span id={`${formId}-docs-label`} className="sr-only">Upload documents</span>
+    /* Dropzone */
+    .drop{
+      border:2px dashed var(--border-strong);
+      border-radius:var(--rounded-md);
+      padding:22px;
+      text-align:center;
+      transition:border-color .2s, background .2s, box-shadow .2s;
+    }
+    .drop:focus{ outline:none; box-shadow:0 0 0 6px var(--ring); border-color:var(--primary)}
+    .drop.hover{ border-color:var(--primary); background:color-mix(in oklab,var(--card), var(--primary) 5%) }
+    .pick-btn{
+      margin-top:10px; border:1px solid var(--border-strong); background:transparent; color:var(--text);
+      padding:8px 12px; border-radius:10px; cursor:pointer;
+    }
+    .pick-btn:hover{ background:color-mix(in oklab,var(--card), var(--text) 5%) }
 
-                <Dropzone
-                  id={`${formId}-file-input`}
-                  disabled={submitting}
-                  onFiles={onAddFiles}
-                  onDrop={onDrop}
-                  onKeyDown={onKeyDropzone}
-                />
+    /* File list */
+    .filelist{margin-top:14px;border:1px solid var(--border);border-radius:14px;overflow:hidden}
+    .fileitem{display:flex; align-items:center; justify-content:space-between; gap:12px; padding:10px 12px; border-top:1px solid var(--border)}
+    .fileitem:first-child{border-top:0}
+    .ext{
+      display:inline-flex; align-items:center; justify-content:center; width:32px; height:32px;
+      border-radius:10px; background:color-mix(in oklab,var(--text), transparent 90%); color:var(--text);
+      font-size:11px; font-weight:700; text-transform:uppercase;
+    }
+    .filename{font-size:14px; font-weight:600; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; max-width:56vw}
+    .meta{font-size:12px; color:var(--muted)}
+    .remove{
+      border:1px solid var(--border-strong); padding:6px 10px; border-radius:10px; background:transparent; cursor:pointer;
+    }
+    .remove:hover{ background:color-mix(in oklab,var(--card), var(--text) 6%) }
 
-                <div className="mt-4 flex items-center justify-between text-sm">
-                  <div className={cx("", totalSizeError ? "text-red-600 dark:text-red-400" : "text-slate-600 dark:text-slate-300")}>{`Total: ${totalSizeMB} MB (limit ${MAX_TOTAL_MB} MB)`}</div>
-                  <button type="button" onClick={clearAll} className="underline decoration-slate-400 hover:decoration-slate-700 disabled:opacity-40" disabled={files.length===0 || submitting}>Clear all</button>
-                </div>
+    /* Buttons */
+    .actions{display:flex; align-items:center; justify-content:space-between; gap:12px; margin-top:16px}
+    .primary{
+      background:linear-gradient(135deg, var(--primary), var(--accent));
+      color:#fff; border:0; padding:10px 16px; border-radius:12px; cursor:pointer;
+      box-shadow:0 6px 16px rgba(16,185,129,.25);
+    }
+    .primary:disabled{opacity:.6; cursor:not-allowed}
+    .link{background:none;border:0;padding:0;color:var(--muted);text-decoration:underline;cursor:pointer}
+    .link:disabled{opacity:.5;cursor:not-allowed}
 
-                <FileList items={files} onRemove={removeFile} submitting={submitting} />
+    /* Status + result */
+    .status{margin-top:10px; font-size:14px}
+    .status.error{color:var(--danger)}
+    .status.success{color:var(--accent)}
+    .result{
+      margin-top:12px; border:1px solid color-mix(in oklab,var(--accent), transparent 65%);
+      background:color-mix(in oklab,var(--accent), transparent 90%); border-radius:14px; padding:14px;
+    }
+    .result a{ color:inherit; text-decoration:underline }
 
-                {totalSizeError && <p className="mt-2 text-sm text-red-600 dark:text-red-400" role="alert">{totalSizeError}</p>}
-              </div>
-            </Card>
+    /* Progress */
+    .progress{position:relative; height:10px; background:var(--border); border-radius:999px; overflow:hidden}
+    .bar{height:100%; width:0%; background:linear-gradient(90deg,var(--primary),var(--accent)); transition:width .15s}
 
-            <div className="mt-6 flex items-center justify-between">
-              <div className="text-xs text-slate-600 dark:text-slate-300">By uploading, you confirm you have the right to share these documents.</div>
-              <PrimaryButton type="submit" disabled={submitting}>
-                <span>{submitting ? "Uploading…" : "Create business & upload"}</span>
-              </PrimaryButton>
-            </div>
-          </form>
+    /* Footer note */
+    .tiny{font-size:12px;color:var(--muted)}
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <section class="hero">
+      <div class="bubble b1" aria-hidden="true"></div>
+      <div class="bubble b2" aria-hidden="true"></div>
+      <h1>Business Onboarding</h1>
+      <p>Create your business and upload documents in one step.</p>
+    </section>
 
-          <div
-            ref={liveRef}
-            className={cx("mt-4 text-sm", statusType === "error" ? "text-red-700 dark:text-red-400" : statusType === "success" ? "text-emerald-700 dark:text-emerald-400" : "text-slate-700 dark:text-slate-300")}
-            role="status"
-          >
-            {status}
-          </div>
+    <!-- Business details -->
+    <section class="card" aria-labelledby="sec-details">
+      <h2 id="sec-details" class="title">Business details</h2>
+      <p class="subtitle">Create the business profile you'll upload documents into.</p>
 
-          <AnimatePresence>
-            {result && (
-              <motion.div
-                initial={{ opacity: 0, y: 8 }}
-                animate={{ opacity: 1, y: 0 }}
-                exit={{ opacity: 0, y: -8 }}
-                className="mt-4 rounded-xl border border-emerald-200/60 dark:border-emerald-800/60 bg-emerald-50/60 dark:bg-emerald-900/20 p-4"
-              >
-                <h3 className="font-semibold">You're all set</h3>
-                <p className="mt-1 text-sm">Quick links for your new business:</p>
-                <ul className="mt-2 space-y-1 text-sm">
-                  {result.chatUrl && (
-                    <li>
-                      <a className="underline underline-offset-2 hover:no-underline" href={result.chatUrl} target="_blank" rel="noreferrer">Open Chat</a>
-                    </li>
-                  )}
-                  {result.analyticsUrl && (
-                    <li>
-                      <a className="underline underline-offset-2 hover:no-underline" href={result.analyticsUrl} target="_blank" rel="noreferrer">Open Analytics</a>
-                    </li>
-                  )}
-                </ul>
-              </motion.div>
-            )}
-          </AnimatePresence>
-        </motion.div>
-      </div>
-    </div>
-  );
-}
-
-// --- UI primitives ---
-function Header(){
-  return (
-    <div className="relative overflow-hidden rounded-2xl border border-slate-200 dark:border-slate-800 bg-white/70 dark:bg-slate-900/70 backdrop-blur p-6 shadow-sm">
-      <div className="absolute -right-16 -top-16 h-48 w-48 rounded-full bg-gradient-to-br from-indigo-500/20 to-emerald-500/20 blur-2xl" aria-hidden="true" />
-      <div className="absolute -left-10 -bottom-16 h-40 w-40 rounded-full bg-gradient-to-br from-sky-500/20 to-fuchsia-500/20 blur-2xl" aria-hidden="true" />
-      <div className="relative">
-        <h1 className="text-2xl sm:text-3xl font-bold tracking-tight">Business Onboarding</h1>
-        <p className="mt-1 text-sm text-slate-600 dark:text-slate-300">Create your business and upload documents in one step.</p>
-      </div>
-    </div>
-  );
-}
-
-function Card({ children, className }){
-  return (
-    <motion.section layout className={cx("rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-5 shadow-sm", className)}>
-      {children}
-    </motion.section>
-  );
-}
-
-function SectionTitle({ title, subtitle }){
-  return (
-    <div>
-      <h2 className="text-lg font-semibold">{title}</h2>
-      {subtitle && <p className="mt-1 text-sm text-slate-600 dark:text-slate-300">{subtitle}</p>}
-    </div>
-  );
-}
-
-function Field({ id, label, value, onChange, help, error, required, optional, type = "text", placeholder }){
-  const describedBy = [];
-  if (help) describedBy.push(`${id}-help`);
-  if (error) describedBy.push(`${id}-error`);
-  return (
-    <div className="">
-      <label htmlFor={id} className="block text-sm font-medium">
-        {label} {required ? <span className="text-red-600" aria-hidden>*</span> : optional ? <span className="text-slate-500">(optional)</span> : null}
-      </label>
-      <input
-        id={id}
-        type={type}
-        value={value}
-        onChange={(e) => onChange(e.target.value)}
-        placeholder={placeholder}
-        aria-invalid={!!error}
-        aria-describedby={describedBy.join(" ") || undefined}
-        className={cx(
-          "mt-1 w-full rounded-xl border bg-white dark:bg-slate-950 px-3 py-2 outline-none transition-shadow",
-          error ? "border-red-500 focus:ring-2 ring-red-300" : "border-slate-300 dark:border-slate-700 focus:ring-2 ring-indigo-300"
-        )}
-      />
-      {help && !error && (
-        <p id={`${id}-help`} className="mt-1 text-xs text-slate-600 dark:text-slate-400">{help}</p>
-      )}
-      {error && (
-        <p id={`${id}-error`} className="mt-1 text-xs text-red-600 dark:text-red-400" role="alert">{error}</p>
-      )}
-    </div>
-  );
-}
-
-function PrimaryButton({ children, className, ...props }){
-  return (
-    <button
-      {...props}
-      className={cx(
-        "inline-flex items-center gap-2 rounded-xl px-4 py-2 text-white disabled:opacity-50 disabled:cursor-not-allowed",
-        "bg-gradient-to-br from-indigo-600 to-emerald-600 hover:from-indigo-500 hover:to-emerald-500 focus:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-indigo-300 dark:focus-visible:ring-indigo-700",
-        className
-      )}
-    >
-      {children}
-    </button>
-  );
-}
-
-function Dropzone({ id, disabled, onFiles, onDrop, onKeyDown }){
-  const inputRef = useRef(null);
-  function onPick(e){ if (e.target.files) onFiles(e.target.files); e.target.value = ""; }
-
-  function onPaste(e){
-    if (disabled) return;
-    const items = e.clipboardData?.files;
-    if (items && items.length) onFiles(items);
-  }
-
-  return (
-    <div onPaste={onPaste}>
-      <input id={id} ref={inputRef} type="file" className="sr-only" multiple accept={ACCEPTED_EXTS.map(x=>"."+x).join(",")} onChange={onPick} />
-      <div
-        tabIndex={0}
-        role="button"
-        aria-describedby={`${id}-hint`}
-        onKeyDown={onKeyDown}
-        onDragOver={(e)=>{e.preventDefault();}}
-        onDrop={onDrop}
-        className={cx(
-          "group relative flex flex-col items-center justify-center rounded-xl border-2 border-dashed p-8 text-center",
-          "border-slate-300 dark:border-slate-700 hover:border-indigo-400 focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-300",
-          disabled && "opacity-50"
-        )}
-      >
-        <div className="pointer-events-none select-none">
-          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" className="mx-auto h-8 w-8 opacity-70"><path d="M12 16a1 1 0 0 1-1-1V9.41l-1.3 1.3a1 1 0 1 1-1.4-1.42l3-3a1 1 0 0 1 1.4 0l3 3a1 1 0 1 1-1.4 1.42L13 9.4V15a1 1 0 0 1-1 1Z"/><path d="M7 20a5 5 0 0 1-1.62-9.73A7 7 0 0 1 19 9a6 6 0 0 1 1 11.9V21H7Z"/></svg>
-          <p className="mt-2 text-sm font-medium">Drop files here</p>
-          <p className="mt-1 text-xs text-slate-600 dark:text-slate-400">or</p>
+      <div class="grid" style="margin-top:16px">
+        <div class="field">
+          <label for="biz-name">Business name <span class="req" aria-hidden="true">*</span></label>
+          <input id="biz-name" class="input" type="text" placeholder="Acme Corp" aria-describedby="name-help name-err" required />
+          <div id="name-help" class="help">The display name your team will see.</div>
+          <div id="name-err" class="error" role="alert" style="display:none"></div>
         </div>
-        <button type="button" onClick={()=>inputRef.current?.click()} className="mt-3 rounded-lg border border-slate-300 dark:border-slate-700 px-3 py-1.5 text-sm hover:bg-slate-50 dark:hover:bg-slate-800">Choose files</button>
-        <p id={`${id}-hint`} className="mt-2 text-xs text-slate-600 dark:text-slate-400">Accepted: PDF, CSV, TXT, DOCX, XLSX, XLS</p>
-      </div>
-    </div>
-  );
-}
 
-function FileList({ items, onRemove, submitting }){
-  if (!items.length) return null;
-  return (
-    <ul className="mt-4 divide-y divide-slate-200 dark:divide-slate-800 rounded-xl border border-slate-200 dark:border-slate-800">
-      {items.map(({id, file}) => (
-        <li key={id} className="flex items-center justify-between gap-3 p-3">
-          <div className="flex min-w-0 items-center gap-3">
-            <span className="inline-flex h-8 w-8 items-center justify-center rounded-lg bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-200 text-xs font-semibold uppercase">
-              {fileExt(file.name).slice(0,4)}
-            </span>
-            <div className="min-w-0">
-              <div className="truncate text-sm font-medium">{file.name}</div>
-              <div className="text-xs text-slate-600 dark:text-slate-400">{bytesToMB(file.size)} MB</div>
+        <div class="field">
+          <label for="biz-slug">Slug <span class="req" aria-hidden="true">*</span></label>
+          <input id="biz-slug" class="input" type="text" placeholder="acme-corp" aria-describedby="slug-help slug-err" required />
+          <div id="slug-help" class="help">Unique identifier (letters, numbers, dashes).</div>
+          <div id="slug-err" class="error" role="alert" style="display:none"></div>
+        </div>
+
+        <div class="field">
+          <label for="biz-email">Contact email <span class="opt">(optional)</span></label>
+          <input id="biz-email" class="input" type="email" placeholder="ops@acme.com" aria-describedby="email-err" />
+          <div id="email-err" class="error" role="alert" style="display:none"></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Documents -->
+    <section class="card" aria-labelledby="sec-docs">
+      <h2 id="sec-docs" class="title">Documents</h2>
+      <p class="subtitle">Drag & drop or pick files. Accepted: PDF, CSV, TXT, DOCX, XLSX, XLS.</p>
+
+      <div class="grid" style="margin-top:14px">
+        <div class="field">
+          <div id="dz" class="drop" tabindex="0" role="button" aria-describedby="dz-hint" aria-label="Upload documents (drop files here or choose files)">
+            <div>
+              <svg width="36" height="36" viewBox="0 0 24 24" aria-hidden="true">
+                <path fill="currentColor" d="M12 16a1 1 0 0 1-1-1V9.41l-1.3 1.3a1 1 0 1 1-1.4-1.42l3-3a1 1 0 0 1 1.4 0l3 3a1 1 0 1 1-1.4 1.42L13 9.4V15a1 1 0 0 1-1 1Z"/>
+                <path fill="currentColor" d="M7 20a5 5 0 0 1-1.62-9.73A7 7 0 0 1 19 9a6 6 0 0 1 1 11.9V21H7Z"/>
+              </svg>
+              <p style="margin:6px 0 4px; font-weight:600">Drop files here</p>
+              <p class="muted text-sm" style="margin:0">or</p>
+              <button id="pick" type="button" class="pick-btn">Choose files</button>
             </div>
+            <p id="dz-hint" class="help" style="margin-top:10px">You can also paste files here.</p>
+            <input id="file-input" type="file" multiple accept=".pdf,.csv,.txt,.docx,.xlsx,.xls" style="position:absolute;opacity:0;pointer-events:none;width:1px;height:1px;" aria-hidden="true" />
           </div>
-          <button type="button" onClick={()=>onRemove(id)} disabled={submitting} className="rounded-md px-2 py-1 text-xs border border-slate-300 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-800 disabled:opacity-40">Remove</button>
-        </li>
-      ))}
-    </ul>
-  );
-}
+
+          <div class="actions" style="margin-top:10px">
+            <div id="totals" class="muted text-sm">Total: 0 MB (limit 50 MB)</div>
+            <button id="clear-all" class="link" type="button" disabled>Clear all</button>
+          </div>
+
+          <div id="file-list" class="filelist" style="display:none"></div>
+          <div id="total-err" class="error" role="alert" style="display:none"></div>
+        </div>
+      </div>
+    </section>
+
+    <div class="actions">
+      <div class="tiny">By uploading, you confirm you have the right to share these documents.</div>
+      <button id="submit" class="primary" type="button">Create business & upload</button>
+    </div>
+
+    <div id="live" class="status" role="status" aria-live="polite"></div>
+
+    <div id="progress-wrap" class="card" style="display:none; margin-top:14px">
+      <div class="text-sm" style="margin-bottom:8px">Uploading… <span id="pct">0%</span></div>
+      <div class="progress"><div id="bar" class="bar"></div></div>
+    </div>
+
+    <div id="result" class="result" style="display:none"></div>
+  </div>
+
+  <script>
+  (function(){
+    // --- Config ---
+    const ACCEPTED = ["pdf","csv","txt","docx","xlsx","xls"];
+    const MAX_MB = 50;
+
+    // --- Elements ---
+    const nameEl = document.getElementById('biz-name');
+    const slugEl = document.getElementById('biz-slug');
+    const emailEl = document.getElementById('biz-email');
+
+    const nameErr = document.getElementById('name-err');
+    const slugErr = document.getElementById('slug-err');
+    const emailErr = document.getElementById('email-err');
+
+    const dz = document.getElementById('dz');
+    const input = document.getElementById('file-input');
+    const pick = document.getElementById('pick');
+    const fileList = document.getElementById('file-list');
+    const totals = document.getElementById('totals');
+    const totalErr = document.getElementById('total-err');
+    const clearAll = document.getElementById('clear-all');
+
+    const live = document.getElementById('live');
+    const submitBtn = document.getElementById('submit');
+
+    const progressWrap = document.getElementById('progress-wrap');
+    const bar = document.getElementById('bar');
+    const pct = document.getElementById('pct');
+    const result = document.getElementById('result');
+
+    // --- State ---
+    let files = []; // {file, id}
+    let submitting = false;
+
+    // --- Helpers ---
+    const ext = (name) => (name.toLowerCase().match(/\\.([a-z0-9]+)$/)||[])[1] || "";
+    const mb = (bytes) => Math.round((bytes/1048576)*10)/10;
+    const totalMB = () => files.reduce((a,f)=>a+mb(f.file.size),0);
+    const say = (msg, type=""){ live.textContent = msg; live.className = "status" + (type ? " "+type : ""); };
+
+    function setError(el, errEl, msg){
+      errEl.style.display = msg ? "" : "none";
+      errEl.textContent = msg || "";
+      el.setAttribute("aria-invalid", msg ? "true" : "false");
+    }
+
+    function validateFields(){
+      const name = nameEl.value.trim();
+      const slug = slugEl.value.trim();
+      const email = emailEl.value.trim();
+
+      setError(nameEl, nameErr, name ? "" : "Business name is required.");
+      setError(slugEl, slugErr, !slug ? "Slug is required." : (/^[-a-z0-9]+$/i.test(slug) ? "" : "Use only letters, numbers, and hyphens."));
+      setError(emailEl, emailErr, email && !/\\S+@\\S+\\.\\S+/.test(email) ? "Enter a valid email." : "");
+
+      const tot = totalMB();
+      totals.textContent = `Total: ${tot} MB (limit ${MAX_MB} MB)`;
+      const tooBig = tot > MAX_MB ? `Total size ${tot}MB exceeds ${MAX_MB}MB.` : "";
+      totalErr.style.display = tooBig ? "" : "none";
+      totalErr.textContent = tooBig;
+
+      return !(nameErr.textContent || slugErr.textContent || emailErr.textContent || tooBig);
+    }
+
+    function renderFiles(){
+      clearAll.disabled = files.length===0 || submitting;
+      fileList.style.display = files.length ? "" : "none";
+      fileList.innerHTML = files.map(({id,file})=>{
+        const e = ext(file.name).slice(0,4).toUpperCase();
+        return `
+          <div class="fileitem" data-id="${id}">
+            <div style="display:flex; align-items:center; gap:12px; min-width:0">
+              <span class="ext">${e || "FILE"}</span>
+              <div style="min-width:0">
+                <div class="filename" title="${file.name}">${file.name}</div>
+                <div class="meta">${mb(file.size)} MB</div>
+              </div>
+            </div>
+            <button class="remove" type="button" aria-label="Remove ${file.name}">Remove</button>
+          </div>`;
+      }).join("");
+    }
+
+    function addFiles(list){
+      const errs=[];
+      const add = [];
+      for(const f of list){
+        if(f.size===0){ errs.push(`${f.name} is empty.`); continue; }
+        const e = ext(f.name);
+        if(!ACCEPTED.includes(e)){ errs.push(`${f.name}: .${e || "(no ext)"} not allowed.`); continue; }
+        add.push({ file:f, id: `${f.name}-${f.size}-${Date.now()}-${Math.random().toString(36).slice(2)}` });
+      }
+      if(add.length){ files = files.concat(add); renderFiles(); validateFields(); }
+      if(errs.length){ say(errs.join("\\n"), "error"); }
+    }
+
+    // --- Events: choose, drop, paste ---
+    pick.addEventListener('click', ()=> input.click());
+    dz.addEventListener('keydown', (e)=>{ if(e.key==="Enter" || e.key===" "){ e.preventDefault(); input.click(); }});
+    dz.addEventListener('dragover', (e)=>{ e.preventDefault(); dz.classList.add('hover'); });
+    dz.addEventListener('dragleave', ()=> dz.classList.remove('hover'));
+    dz.addEventListener('drop', (e)=>{ e.preventDefault(); dz.classList.remove('hover'); if(submitting) return; if(e.dataTransfer.files?.length) addFiles(e.dataTransfer.files); });
+    dz.addEventListener('paste', (e)=>{ if(submitting) return; const items = e.clipboardData?.files; if(items?.length) addFiles(items); });
+
+    input.addEventListener('change', (e)=>{ if(e.target.files?.length) addFiles(e.target.files); e.target.value = ""; });
+
+    fileList.addEventListener('click', (e)=>{
+      const btn = e.target.closest('.remove'); if(!btn) return;
+      const row = btn.closest('.fileitem'); const id = row?.getAttribute('data-id');
+      files = files.filter(f=>f.id !== id); renderFiles(); validateFields();
+    });
+
+    clearAll.addEventListener('click', ()=>{ files = []; renderFiles(); validateFields(); });
+
+    // Inline validation on blur / input
+    nameEl.addEventListener('blur', validateFields);
+    slugEl.addEventListener('input', ()=>{ slugEl.value = slugEl.value.replace(/[^-a-z0-9]/ig,''); validateFields(); });
+    slugEl.addEventListener('blur', validateFields);
+    emailEl.addEventListener('blur', validateFields);
+
+    // --- Submit with XHR progress ---
+    submitBtn.addEventListener('click', async ()=>{
+      say(""); result.style.display="none";
+      if(!validateFields()){ say("Please fix validation errors before submitting.", "error"); return; }
+      if(files.length===0){ say("Please add at least one file.", "error"); return; }
+
+      submitting = true;
+      submitBtn.disabled = true;
+      clearAll.disabled = true;
+
+      progressWrap.style.display = "";
+      bar.style.width = "0%"; pct.textContent = "0%";
+
+      try{
+        const fd = new FormData();
+        const businessData = {
+          name: nameEl.value.trim(),
+          slug: slugEl.value.trim(),
+          email: emailEl.value.trim()
+        };
+        fd.append("businessData", JSON.stringify(businessData));
+        for(const {file} of files) fd.append("files", file, file.name);
+
+        const xhr = new XMLHttpRequest();
+        xhr.open("POST", "/admin/business/create-and-upload");
+
+        xhr.upload.addEventListener("progress", (e)=>{
+          if(e.lengthComputable){
+            const p = Math.round((e.loaded/e.total)*100);
+            bar.style.width = p + "%";
+            pct.textContent = p + "%";
+          }
+        });
+
+        xhr.onreadystatechange = ()=>{
+          if(xhr.readyState !== 4) return;
+          let data = null;
+          try{ data = JSON.parse(xhr.responseText); } catch(_){}
+          if(xhr.status < 200 || xhr.status >= 300 || !data || !data.success){
+            const err = data?.error || xhr.responseText || `HTTP ${xhr.status}`;
+            say("Upload failed: " + err, "error");
+            progressWrap.style.display = "none";
+            submitting = false; submitBtn.disabled=false; validateFields();
+            return;
+          }
+          const chatUrl = data.urls?.chatUrl;
+          const analyticsUrl = data.urls?.analyticsUrl;
+          const filesProcessed = data.upload?.filesProcessed ?? 0;
+
+          say(`Success! Processed ${filesProcessed} file${filesProcessed===1?"":"s"}.`, "success");
+          result.style.display = "";
+          result.innerHTML = `
+            <strong>You're all set.</strong>
+            <div class="text-sm" style="margin-top:6px">Quick links for your new business:</div>
+            <ul class="text-sm" style="margin:6px 0 0 16px">
+              ${chatUrl ? `<li><a href="${chatUrl}" target="_blank" rel="noopener noreferrer">Open Chat</a></li>` : ""}
+              ${analyticsUrl ? `<li><a href="${analyticsUrl}" target="_blank" rel="noopener noreferrer">Open Analytics</a></li>` : ""}
+            </ul>
+          `;
+          // optional: files = []; renderFiles();
+          submitting = false; submitBtn.disabled=false; validateFields();
+          // keep progress at 100% for a moment
+          bar.style.width="100%"; pct.textContent="100%";
+          setTimeout(()=>{ progressWrap.style.display="none"; }, 800);
+        };
+
+        xhr.onerror = ()=>{
+          say("Network error while uploading.", "error");
+          submitting = false; submitBtn.disabled=false; progressWrap.style.display = "none"; validateFields();
+        };
+
+        xhr.send(fd);
+      } catch(err){
+        say("Unexpected error: " + err.message, "error");
+        submitting = false; submitBtn.disabled=false; progressWrap.style.display = "none"; validateFields();
+      }
+    });
+
+    // Init
+    validateFields();
+  })();
+  </script>
+</body>
+</html>

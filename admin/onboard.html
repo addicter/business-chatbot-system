@@ -1,188 +1,385 @@
-<!DOCTYPE html>
-<html lang="en">
-<head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Onboard Business</title>
-  <style>
-    /* Basic styling for the form */
-    body {
-      font-family: Arial, sans-serif;
-      background-color: #f5f5f5;
-      margin: 0;
-      padding: 20px;
+import React, { useEffect, useId, useRef, useState } from "react";
+import { motion, AnimatePresence } from "framer-motion";
+
+/**
+ * Business Onboarding — Modern React Redesign (2025)
+ * - Single-column layout (Carbon DS, NN/g-aligned)
+ * - Accessible drag-and-drop with keyboard & input fallback (WCAG 2.2 SC 2.5.7)
+ * - Inline validation with helper/error text (Material 3 guidance)
+ * - ARIA live regions for status & errors
+ * - Dark-mode friendly, soft gradients, subtle microinteractions
+ * - Preserves your API: POST /admin/business/create-and-upload
+ *
+ * Requirements: TailwindCSS + Framer Motion (both available in ChatGPT canvas runtime)
+ */
+
+// --- Utility helpers ---
+const ACCEPTED_EXTS = ["pdf","csv","txt","docx","xlsx","xls"]; // keep in sync with server
+const MAX_TOTAL_MB = 50; // tweak as needed
+
+function bytesToMB(bytes) { return Math.round((bytes / (1024*1024)) * 10) / 10; }
+function fileExt(name) { const m = name.toLowerCase().match(/\.([a-z0-9]+)$/); return m ? m[1] : ""; }
+function cx(...classes){ return classes.filter(Boolean).join(" "); }
+
+export default function BusinessOnboarding() {
+  const formId = useId();
+  const [name, setName] = useState("");
+  const [slug, setSlug] = useState("");
+  const [email, setEmail] = useState("");
+  const [files, setFiles] = useState([]); // {file, id, error}
+  const [status, setStatus] = useState(""); // human-readable
+  const [statusType, setStatusType] = useState(""); // success | error | info
+  const [submitting, setSubmitting] = useState(false);
+  const liveRef = useRef(null);
+
+  // Derived validations
+  const nameError = name.trim() === "" ? "Business name is required." : "";
+  const slugError = slug.trim() === "" ? "Slug is required." : (!/^[-a-z0-9]+$/i.test(slug) ? "Use only letters, numbers, and hyphens." : "");
+  const emailError = email && !/^\S+@\S+\.\S+$/.test(email) ? "Enter a valid email." : "";
+
+  const totalSizeMB = files.reduce((acc, f) => acc + bytesToMB(f.file.size), 0);
+  const totalSizeError = totalSizeMB > MAX_TOTAL_MB ? `Total size ${totalSizeMB}MB exceeds ${MAX_TOTAL_MB}MB.` : "";
+
+  useEffect(() => {
+    if (status && liveRef.current) {
+      // Move focus to live region for SRs without stealing for keyboard users
+      liveRef.current.setAttribute("aria-live", statusType === "error" ? "assertive" : "polite");
     }
-    .container {
-      max-width: 600px;
-      margin: 0 auto;
-      background-color: #fff;
-      padding: 20px;
-      border-radius: 8px;
-      box-shadow: 0 0 10px rgba(0, 0, 0, 0.1);
+  }, [status, statusType]);
+
+  function announce(message, type = "info") {
+    setStatus(message);
+    setStatusType(type);
+  }
+
+  function onAddFiles(fileList) {
+    const newItems = [];
+    const errors = [];
+    for (const f of fileList) {
+      if (f.size === 0) { errors.push(`${f.name} is empty.`); continue; }
+      const ext = fileExt(f.name);
+      if (!ACCEPTED_EXTS.includes(ext)) { errors.push(`${f.name}: .${ext || "(no ext)"} not allowed.`); continue; }
+      newItems.push({ file: f, id: `${f.name}-${f.size}-${Date.now()}-${Math.random().toString(36).slice(2)}` });
     }
-    h1 {
-      text-align: center;
-      margin-bottom: 20px;
+    if (errors.length) announce(errors.join("\n"), "error");
+    if (newItems.length) setFiles(prev => [...prev, ...newItems]);
+  }
+
+  function onDrop(e){
+    e.preventDefault();
+    if (submitting) return;
+    const dt = e.dataTransfer;
+    if (dt?.files && dt.files.length) onAddFiles(dt.files);
+  }
+
+  function onKeyDropzone(e){
+    if (e.key === "Enter" || e.key === " ") {
+      // Trigger hidden input
+      document.getElementById(`${formId}-file-input`)?.click();
     }
-    .form-group {
-      margin-bottom: 15px;
+  }
+
+  function removeFile(id){ setFiles(prev => prev.filter(f => f.id !== id)); }
+  function clearAll(){ setFiles([]); }
+
+  async function handleSubmit(e){
+    e.preventDefault();
+    announce("", "info");
+
+    // basic client validation
+    if (nameError || slugError || emailError || totalSizeError) {
+      announce("Please fix validation errors before submitting.", "error");
+      return;
     }
-    label {
-      display: block;
-      margin-bottom: 5px;
-      font-weight: bold;
+    if (files.length === 0) { announce("Please add at least one file.", "error"); return; }
+
+    setSubmitting(true);
+    try {
+      const fd = new FormData();
+      const businessData = { name: name.trim(), slug: slug.trim(), email: email.trim() };
+      fd.append("businessData", JSON.stringify(businessData));
+      for (const {file} of files) fd.append("files", file, file.name);
+
+      const res = await fetch("/admin/business/create-and-upload", { method: "POST", body: fd });
+      const text = await res.text();
+      let data = null;
+      try { data = JSON.parse(text); } catch { /* leave null */ }
+
+      if (!res.ok || !data || !data.success) {
+        const error = data?.error || text || `HTTP ${res.status}`;
+        throw new Error(error);
+      }
+
+      const chatUrl = data.urls?.chatUrl;
+      const analyticsUrl = data.urls?.analyticsUrl;
+      const filesProcessed = data.upload?.filesProcessed ?? 0;
+      announce(`Success! Processed ${filesProcessed} file${filesProcessed === 1 ? "" : "s"}.`, "success");
+
+      // Present result inline
+      setResult({ chatUrl, analyticsUrl, filesProcessed });
+      // Optional: clear files after success
+      // clearAll();
+    } catch (err) {
+      announce(`Upload failed: ${err.message}`, "error");
+    } finally {
+      setSubmitting(false);
     }
-    input[type="text"], input[type="email"], input[type="file"] {
-      width: 100%;
-      padding: 8px;
-      border: 1px solid #ccc;
-      border-radius: 4px;
-      box-sizing: border-box;
-    }
-    .btn {
-      display: inline-block;
-      padding: 10px 20px;
-      background-color: #4CAF50;
-      color: white;
-      border: none;
-      border-radius: 4px;
-      cursor: pointer;
-    }
-    .btn:hover {
-      background-color: #45a049;
-    }
-    #status {
-      margin-top: 10px;
-      font-weight: bold;
-    }
-    #status.error {
-      color: #d93025;
-    }
-    #status.success {
-      color: #0a7d32;
-    }
-    #result {
-      margin-top: 10px;
-    }
-    a {
-      color: #1a73e8;
-      text-decoration: none;
-    }
-    a:hover {
-      text-decoration: underline;
-    }
-  </style>
-</head>
-<body>
-  <div class="container">
-    <h1>Business Onboarding</h1>
-    <div class="form-group">
-      <label for="biz-name">Business Name</label>
-      <input id="biz-name" type="text" placeholder="Enter business name" required>
+  }
+
+  const [result, setResult] = useState(null);
+
+  return (
+    <div className="min-h-screen bg-gradient-to-b from-slate-50 to-slate-100 dark:from-slate-950 dark:to-slate-900 text-slate-900 dark:text-slate-100 py-10 px-4">
+      <div className="mx-auto max-w-3xl">
+        <Header />
+        <motion.div layout className="mt-6">
+          <form onSubmit={handleSubmit} noValidate className="">
+            <Card>
+              <SectionTitle title="Business details" subtitle="Create the business profile you'll upload documents into." />
+              <div className="mt-6 space-y-5">
+                <Field
+                  id={`${formId}-name`}
+                  label="Business name"
+                  required
+                  value={name}
+                  onChange={setName}
+                  error={nameError}
+                  placeholder="Acme Corp"
+                  help="The display name your team will see."
+                />
+                <Field
+                  id={`${formId}-slug`}
+                  label="Slug"
+                  required
+                  value={slug}
+                  onChange={setSlug}
+                  error={slugError}
+                  placeholder="acme-corp"
+                  help="Unique identifier (letters, numbers, dashes)."
+                />
+                <Field
+                  id={`${formId}-email`}
+                  type="email"
+                  label="Contact email"
+                  value={email}
+                  onChange={setEmail}
+                  error={emailError}
+                  placeholder="ops@acme.com"
+                  optional
+                />
+              </div>
+            </Card>
+
+            <Card className="mt-6">
+              <SectionTitle title="Documents" subtitle="Drag & drop or pick files. We accept PDF, CSV, TXT, DOCX, XLSX, XLS." />
+
+              <div
+                role="group"
+                aria-labelledby={`${formId}-docs-label`}
+                className="mt-4"
+              >
+                <span id={`${formId}-docs-label`} className="sr-only">Upload documents</span>
+
+                <Dropzone
+                  id={`${formId}-file-input`}
+                  disabled={submitting}
+                  onFiles={onAddFiles}
+                  onDrop={onDrop}
+                  onKeyDown={onKeyDropzone}
+                />
+
+                <div className="mt-4 flex items-center justify-between text-sm">
+                  <div className={cx("", totalSizeError ? "text-red-600 dark:text-red-400" : "text-slate-600 dark:text-slate-300")}>{`Total: ${totalSizeMB} MB (limit ${MAX_TOTAL_MB} MB)`}</div>
+                  <button type="button" onClick={clearAll} className="underline decoration-slate-400 hover:decoration-slate-700 disabled:opacity-40" disabled={files.length===0 || submitting}>Clear all</button>
+                </div>
+
+                <FileList items={files} onRemove={removeFile} submitting={submitting} />
+
+                {totalSizeError && <p className="mt-2 text-sm text-red-600 dark:text-red-400" role="alert">{totalSizeError}</p>}
+              </div>
+            </Card>
+
+            <div className="mt-6 flex items-center justify-between">
+              <div className="text-xs text-slate-600 dark:text-slate-300">By uploading, you confirm you have the right to share these documents.</div>
+              <PrimaryButton type="submit" disabled={submitting}>
+                <span>{submitting ? "Uploading…" : "Create business & upload"}</span>
+              </PrimaryButton>
+            </div>
+          </form>
+
+          <div
+            ref={liveRef}
+            className={cx("mt-4 text-sm", statusType === "error" ? "text-red-700 dark:text-red-400" : statusType === "success" ? "text-emerald-700 dark:text-emerald-400" : "text-slate-700 dark:text-slate-300")}
+            role="status"
+          >
+            {status}
+          </div>
+
+          <AnimatePresence>
+            {result && (
+              <motion.div
+                initial={{ opacity: 0, y: 8 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0, y: -8 }}
+                className="mt-4 rounded-xl border border-emerald-200/60 dark:border-emerald-800/60 bg-emerald-50/60 dark:bg-emerald-900/20 p-4"
+              >
+                <h3 className="font-semibold">You're all set</h3>
+                <p className="mt-1 text-sm">Quick links for your new business:</p>
+                <ul className="mt-2 space-y-1 text-sm">
+                  {result.chatUrl && (
+                    <li>
+                      <a className="underline underline-offset-2 hover:no-underline" href={result.chatUrl} target="_blank" rel="noreferrer">Open Chat</a>
+                    </li>
+                  )}
+                  {result.analyticsUrl && (
+                    <li>
+                      <a className="underline underline-offset-2 hover:no-underline" href={result.analyticsUrl} target="_blank" rel="noreferrer">Open Analytics</a>
+                    </li>
+                  )}
+                </ul>
+              </motion.div>
+            )}
+          </AnimatePresence>
+        </motion.div>
+      </div>
     </div>
-    <div class="form-group">
-      <label for="biz-slug">Slug (unique identifier)</label>
-      <input id="biz-slug" type="text" placeholder="Enter unique slug" required>
+  );
+}
+
+// --- UI primitives ---
+function Header(){
+  return (
+    <div className="relative overflow-hidden rounded-2xl border border-slate-200 dark:border-slate-800 bg-white/70 dark:bg-slate-900/70 backdrop-blur p-6 shadow-sm">
+      <div className="absolute -right-16 -top-16 h-48 w-48 rounded-full bg-gradient-to-br from-indigo-500/20 to-emerald-500/20 blur-2xl" aria-hidden="true" />
+      <div className="absolute -left-10 -bottom-16 h-40 w-40 rounded-full bg-gradient-to-br from-sky-500/20 to-fuchsia-500/20 blur-2xl" aria-hidden="true" />
+      <div className="relative">
+        <h1 className="text-2xl sm:text-3xl font-bold tracking-tight">Business Onboarding</h1>
+        <p className="mt-1 text-sm text-slate-600 dark:text-slate-300">Create your business and upload documents in one step.</p>
+      </div>
     </div>
-    <div class="form-group">
-      <label for="biz-email">Email (optional)</label>
-      <input id="biz-email" type="email" placeholder="Enter contact email">
+  );
+}
+
+function Card({ children, className }){
+  return (
+    <motion.section layout className={cx("rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-5 shadow-sm", className)}>
+      {children}
+    </motion.section>
+  );
+}
+
+function SectionTitle({ title, subtitle }){
+  return (
+    <div>
+      <h2 className="text-lg font-semibold">{title}</h2>
+      {subtitle && <p className="mt-1 text-sm text-slate-600 dark:text-slate-300">{subtitle}</p>}
     </div>
-    <div class="form-group">
-      <label for="biz-files">Upload Documents</label>
-      <input id="biz-files" type="file" multiple accept=".pdf,.csv,.txt,.docx,.xlsx,.xls">
+  );
+}
+
+function Field({ id, label, value, onChange, help, error, required, optional, type = "text", placeholder }){
+  const describedBy = [];
+  if (help) describedBy.push(`${id}-help`);
+  if (error) describedBy.push(`${id}-error`);
+  return (
+    <div className="">
+      <label htmlFor={id} className="block text-sm font-medium">
+        {label} {required ? <span className="text-red-600" aria-hidden>*</span> : optional ? <span className="text-slate-500">(optional)</span> : null}
+      </label>
+      <input
+        id={id}
+        type={type}
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        placeholder={placeholder}
+        aria-invalid={!!error}
+        aria-describedby={describedBy.join(" ") || undefined}
+        className={cx(
+          "mt-1 w-full rounded-xl border bg-white dark:bg-slate-950 px-3 py-2 outline-none transition-shadow",
+          error ? "border-red-500 focus:ring-2 ring-red-300" : "border-slate-300 dark:border-slate-700 focus:ring-2 ring-indigo-300"
+        )}
+      />
+      {help && !error && (
+        <p id={`${id}-help`} className="mt-1 text-xs text-slate-600 dark:text-slate-400">{help}</p>
+      )}
+      {error && (
+        <p id={`${id}-error`} className="mt-1 text-xs text-red-600 dark:text-red-400" role="alert">{error}</p>
+      )}
     </div>
-    <button id="create-upload" class="btn">Create Business &amp; Upload Files</button>
-    <div id="status"></div>
-    <div id="result"></div>
-  </div>
+  );
+}
 
-  <script>
-  (function() {
-    const btn = document.getElementById('create-upload');
-    const nameInput = document.getElementById('biz-name');
-    const slugInput = document.getElementById('biz-slug');
-    const emailInput = document.getElementById('biz-email');
-    const fileInput = document.getElementById('biz-files');
-    const statusDiv = document.getElementById('status');
-    const resultDiv = document.getElementById('result');
+function PrimaryButton({ children, className, ...props }){
+  return (
+    <button
+      {...props}
+      className={cx(
+        "inline-flex items-center gap-2 rounded-xl px-4 py-2 text-white disabled:opacity-50 disabled:cursor-not-allowed",
+        "bg-gradient-to-br from-indigo-600 to-emerald-600 hover:from-indigo-500 hover:to-emerald-500 focus:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-indigo-300 dark:focus-visible:ring-indigo-700",
+        className
+      )}
+    >
+      {children}
+    </button>
+  );
+}
 
-    function setStatus(message, type) {
-      statusDiv.textContent = message;
-      statusDiv.className = '';
-      if (type === 'error') statusDiv.classList.add('error');
-      if (type === 'success') statusDiv.classList.add('success');
-    }
+function Dropzone({ id, disabled, onFiles, onDrop, onKeyDown }){
+  const inputRef = useRef(null);
+  function onPick(e){ if (e.target.files) onFiles(e.target.files); e.target.value = ""; }
 
-    btn.addEventListener('click', async (e) => {
-      e.preventDefault();
-      // Clear previous messages
-      setStatus('', '');
-      resultDiv.innerHTML = '';
+  function onPaste(e){
+    if (disabled) return;
+    const items = e.clipboardData?.files;
+    if (items && items.length) onFiles(items);
+  }
 
-      const name = nameInput.value.trim();
-      const slug = slugInput.value.trim();
-      const email = emailInput.value.trim();
-      const files = fileInput.files;
+  return (
+    <div onPaste={onPaste}>
+      <input id={id} ref={inputRef} type="file" className="sr-only" multiple accept={ACCEPTED_EXTS.map(x=>"."+x).join(",")} onChange={onPick} />
+      <div
+        tabIndex={0}
+        role="button"
+        aria-describedby={`${id}-hint`}
+        onKeyDown={onKeyDown}
+        onDragOver={(e)=>{e.preventDefault();}}
+        onDrop={onDrop}
+        className={cx(
+          "group relative flex flex-col items-center justify-center rounded-xl border-2 border-dashed p-8 text-center",
+          "border-slate-300 dark:border-slate-700 hover:border-indigo-400 focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-300",
+          disabled && "opacity-50"
+        )}
+      >
+        <div className="pointer-events-none select-none">
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" className="mx-auto h-8 w-8 opacity-70"><path d="M12 16a1 1 0 0 1-1-1V9.41l-1.3 1.3a1 1 0 1 1-1.4-1.42l3-3a1 1 0 0 1 1.4 0l3 3a1 1 0 1 1-1.4 1.42L13 9.4V15a1 1 0 0 1-1 1Z"/><path d="M7 20a5 5 0 0 1-1.62-9.73A7 7 0 0 1 19 9a6 6 0 0 1 1 11.9V21H7Z"/></svg>
+          <p className="mt-2 text-sm font-medium">Drop files here</p>
+          <p className="mt-1 text-xs text-slate-600 dark:text-slate-400">or</p>
+        </div>
+        <button type="button" onClick={()=>inputRef.current?.click()} className="mt-3 rounded-lg border border-slate-300 dark:border-slate-700 px-3 py-1.5 text-sm hover:bg-slate-50 dark:hover:bg-slate-800">Choose files</button>
+        <p id={`${id}-hint`} className="mt-2 text-xs text-slate-600 dark:text-slate-400">Accepted: PDF, CSV, TXT, DOCX, XLSX, XLS</p>
+      </div>
+    </div>
+  );
+}
 
-      if (!name || !slug) {
-        setStatus('Name and slug are required.', 'error');
-        return;
-      }
-      if (files.length === 0) {
-        setStatus('Please select at least one file.', 'error');
-        return;
-      }
-      // Check for empty files
-      for (const file of files) {
-        if (file.size === 0) {
-          setStatus(`File ${file.name} is empty.`, 'error');
-          return;
-        }
-      }
-
-      setStatus('Uploading...', 'success');
-
-      const formData = new FormData();
-      // API expects JSON in `businessData`
-      const businessData = { name: name, slug: slug, email: email };
-      formData.append('businessData', JSON.stringify(businessData));
-      // Append files under 'files'
-      for (const file of files) {
-        formData.append('files', file, file.name);
-      }
-
-      try {
-        const response = await fetch('/admin/business/create-and-upload', {
-          method: 'POST',
-          body: formData
-        });
-        const text = await response.text();
-        let data;
-        try {
-          data = JSON.parse(text);
-        } catch (parseErr) {
-          data = null;
-        }
-        if (!response.ok || !data || !data.success) {
-          const error = data?.error || text || `HTTP ${response.status}`;
-          setStatus('Upload failed: ' + error, 'error');
-          return;
-        }
-        // Success
-        const chatUrl = data.urls?.chatUrl;
-        const analyticsUrl = data.urls?.analyticsUrl;
-        const filesProcessed = data.upload?.filesProcessed ?? 0;
-        setStatus(`Success! Processed ${filesProcessed} file(s).`, 'success');
-        resultDiv.innerHTML = `
-          <div>Chat URL: <a href="${chatUrl}" target="_blank">${chatUrl}</a></div>
-          <div>Analytics URL: <a href="${analyticsUrl}" target="_blank">${analyticsUrl}</a></div>
-        `;
-      } catch (err) {
-        setStatus('Network error: ' + err.message, 'error');
-      }
-    });
-  })();
-  </script>
-</body>
-</html>
+function FileList({ items, onRemove, submitting }){
+  if (!items.length) return null;
+  return (
+    <ul className="mt-4 divide-y divide-slate-200 dark:divide-slate-800 rounded-xl border border-slate-200 dark:border-slate-800">
+      {items.map(({id, file}) => (
+        <li key={id} className="flex items-center justify-between gap-3 p-3">
+          <div className="flex min-w-0 items-center gap-3">
+            <span className="inline-flex h-8 w-8 items-center justify-center rounded-lg bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-200 text-xs font-semibold uppercase">
+              {fileExt(file.name).slice(0,4)}
+            </span>
+            <div className="min-w-0">
+              <div className="truncate text-sm font-medium">{file.name}</div>
+              <div className="text-xs text-slate-600 dark:text-slate-400">{bytesToMB(file.size)} MB</div>
+            </div>
+          </div>
+          <button type="button" onClick={()=>onRemove(id)} disabled={submitting} className="rounded-md px-2 py-1 text-xs border border-slate-300 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-800 disabled:opacity-40">Remove</button>
+        </li>
+      ))}
+    </ul>
+  );
+}

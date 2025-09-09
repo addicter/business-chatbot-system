@@ -74,7 +74,6 @@ function verifySessionToken(req, res, next) {
 // Routes
 
 // Add this test route to your server.mjs to test OpenAI integration:
-
 app.get('/debug/test-openai', async (req, res) => {
   try {
     console.log('🧪 Testing OpenAI integration...');
@@ -156,6 +155,31 @@ app.get('/debug/test-openai', async (req, res) => {
       error: errorType,
       solution: solution,
       details: error.message
+    });
+  }
+});
+
+// Add DynamoDB test route
+app.get('/debug/test-dynamodb', async (req, res) => {
+  try {
+    console.log('🧪 Testing DynamoDB connection...');
+    console.log('🌍 AWS_REGION:', process.env.AWS_REGION);
+    
+    const businesses = await getAllBusinesses();
+    
+    res.json({ 
+      success: true, 
+      region: process.env.AWS_REGION,
+      businessCount: businesses.length,
+      message: 'DynamoDB connection working!',
+      businesses: businesses.slice(0, 3) // Show first 3 businesses
+    });
+  } catch (error) {
+    console.error('❌ DynamoDB test failed:', error);
+    res.status(500).json({ 
+      success: false, 
+      error: error.message,
+      region: process.env.AWS_REGION 
     });
   }
 });
@@ -242,10 +266,10 @@ app.get('/health', (req, res) => {
   });
 });
 
-// Get business information by hash (public)
-app.get('/api/business/:chatHash', (req, res) => {
+// Get business information by hash (public) - FIXED
+app.get('/api/business/:chatHash', async (req, res) => {
   try {
-    const business = getBusinessByChatHash(req.params.chatHash);
+    const business = await getBusinessByChatHash(req.params.chatHash);
     if (!business) {
       return res.status(404).json({ error: 'Business not found' });
     }
@@ -267,16 +291,17 @@ app.get('/api/business/:chatHash', (req, res) => {
     
     res.json(publicInfo);
   } catch (error) {
+    console.error('Error getting business:', error);
     res.status(500).json({ error: 'Internal server error' });
   }
 });
 
-// Initialize chat session
-app.post('/api/chat/init', (req, res) => {
+// Initialize chat session - FIXED
+app.post('/api/chat/init', async (req, res) => {
   try {
     const { chatHash } = req.body;
     
-    const business = getBusinessByChatHash(chatHash);
+    const business = await getBusinessByChatHash(chatHash);
     if (!business) {
       return res.status(404).json({ error: 'Business not found' });
     }
@@ -284,7 +309,7 @@ app.post('/api/chat/init', (req, res) => {
     const userIp = req.ip || req.connection.remoteAddress;
     const userAgent = req.get('User-Agent') || '';
     
-    const sessionId = createSession(business.id, userIp, userAgent);
+    const sessionId = await createSession(business.id, userIp, userAgent);
     const token = createSessionToken(business.id, sessionId);
     
     res.json({ 
@@ -302,7 +327,7 @@ app.post('/api/chat/init', (req, res) => {
   }
 });
 
-// Send message (unchanged)
+// Send message - FIXED
 app.post('/api/chat/message', verifySessionToken, async (req, res) => {
   try {
     const { message } = req.body;
@@ -312,7 +337,7 @@ app.post('/api/chat/message', verifySessionToken, async (req, res) => {
       return res.status(400).json({ error: 'Message cannot be empty' });
     }
     
-    const business = getBusinessById(businessId);
+    const business = await getBusinessById(businessId);
     if (!business) {
       return res.status(404).json({ error: 'Business not found' });
     }
@@ -321,11 +346,11 @@ app.post('/api/chat/message', verifySessionToken, async (req, res) => {
     const sentiment = aiSystem.analyzeSentiment(message);
     
     const relevantChunks = await aiSystem.retrieveRelevantChunks(businessId, message);
-    const history = getSessionHistory(sessionId, 6);
+    const history = await getSessionHistory(sessionId, 6);
     const aiResponse = await aiSystem.generateResponse(business, message, history, relevantChunks);
     
-    saveMessage(sessionId, businessId, 'user', message, intent, sentiment, 0.8, relevantChunks.map(c => c.id));
-    saveMessage(sessionId, businessId, 'assistant', aiResponse);
+    await saveMessage(sessionId, businessId, 'user', message, intent, sentiment, 0.8, relevantChunks.map(c => c.id));
+    await saveMessage(sessionId, businessId, 'assistant', aiResponse);
     
     const suggestions = aiSystem.generateSuggestions(intent, business);
     const showContactForm = aiSystem.shouldShowContactForm(intent, message);
@@ -347,7 +372,7 @@ app.post('/api/chat/message', verifySessionToken, async (req, res) => {
   }
 });
 
-// Lead capture (unchanged)
+// Lead capture - FIXED
 app.post('/api/lead/capture', verifySessionToken, async (req, res) => {
   try {
     const { name, email, phone, interest, budget, timeline, message } = req.body;
@@ -357,23 +382,24 @@ app.post('/api/lead/capture', verifySessionToken, async (req, res) => {
       return res.status(400).json({ error: 'Name and email are required' });
     }
     
-    const business = getBusinessById(businessId);
+    const business = await getBusinessById(businessId);
     if (!business) {
       return res.status(404).json({ error: 'Business not found' });
     }
     
     const leadData = { name, email, phone, interest, budget, timeline, message };
-    const leadId = createLead(businessId, sessionId, leadData);
+    const leadId = await createLead(businessId, sessionId, leadData);
     
-    updateSession(sessionId, {
+    await updateSession(sessionId, {
       user_name: name,
       user_email: email,
       user_phone: phone || ''
     });
     
-    if (business.enable_email_notifications) {
-      await emailService.sendLeadNotification(leadData, business);
-    }
+    // Commenting out email service for now since it's not implemented
+    // if (business.enable_email_notifications) {
+    //   await emailService.sendLeadNotification(leadData, business);
+    // }
     
     res.json({
       success: true,
@@ -387,19 +413,18 @@ app.post('/api/lead/capture', verifySessionToken, async (req, res) => {
   }
 });
 
-
-// Add this route in server.mjs after the other routes
-app.get('/api/analytics/:analyticsHash', (req, res) => {
+// Analytics route - FIXED
+app.get('/api/analytics/:analyticsHash', async (req, res) => {
   try {
     const { analyticsHash } = req.params;
     const { days = 30 } = req.query;
     
-    const business = getBusinessByAnalyticsHash(analyticsHash);
+    const business = await getBusinessByAnalyticsHash(analyticsHash);
     if (!business) {
       return res.status(404).json({ error: 'Analytics not found' });
     }
     
-    const analytics = getBusinessAnalytics(business.id, parseInt(days));
+    const analytics = await getBusinessAnalytics(business.id, parseInt(days));
     
     res.json({
       business: {
@@ -416,24 +441,34 @@ app.get('/api/analytics/:analyticsHash', (req, res) => {
   }
 });
 
-// Combined Admin Route: Create Business + Upload Files
+// Combined Admin Route: Create Business + Upload Files - FIXED
 app.post('/admin/business/create-and-upload', upload.array('files', 10), async (req, res) => {
+  console.log('🚀 CREATE-AND-UPLOAD endpoint hit');
+  console.log('📋 Request body keys:', Object.keys(req.body));
+  console.log('📁 Files count:', req.files?.length || 0);
+  
   try {
     const businessData = JSON.parse(req.body.businessData || '{}');
+    console.log('📊 Business data parsed:', businessData.name);
     
     if (!businessData.slug || !businessData.name) {
+      console.log('❌ Missing required fields');
       return res.status(400).json({ error: 'Business slug and name are required' });
     }
     
     // Check if slug already exists
-    const existing = getBusinessBySlug(businessData.slug);
+    const existing = await getBusinessBySlug(businessData.slug);
     if (existing) {
       return res.status(409).json({ error: 'Business slug already exists' });
     }
     
+    console.log('💾 About to create business in DynamoDB...');
+    
     // Create business
-    const result = createBusiness(businessData);
-    const business = getBusinessBySlug(businessData.slug);
+    const result = await createBusiness(businessData);
+    const business = await getBusinessBySlug(businessData.slug);
+    
+    console.log('✅ Business created successfully');
     
     const protocol = req.headers['x-forwarded-proto'] || req.protocol;
     const host = req.get('host');
@@ -444,14 +479,18 @@ app.post('/admin/business/create-and-upload', upload.array('files', 10), async (
     
     // Process uploaded files if any
     if (req.files && req.files.length > 0) {
+      console.log(`📁 Processing ${req.files.length} files...`);
+      
       for (const file of req.files) {
         try {
+          console.log(`📄 Processing file: ${file.originalname}`);
+          
           // Get file extension from filename instead of mimetype
           const fileExt = path.extname(file.originalname).slice(1).toLowerCase();
           const content = await FileProcessor.processFile(file.path, fileExt, file.originalname);
           const category = FileProcessor.categorizeContent(content, file.originalname);
           
-          const documentId = saveDocument(
+          const documentId = await saveDocument(
             business.id,
             file.filename,
             file.originalname,
@@ -470,7 +509,7 @@ app.post('/admin/business/create-and-upload', upload.array('files', 10), async (
             
             try {
               const embedding = await aiSystem.createEmbedding(chunk);
-              saveChunk(business.id, documentId, i, chunk, embedding, category, keywords);
+              await saveChunk(business.id, documentId, i, chunk, embedding, category, keywords);
               chunkCount++;
             } catch (embeddingError) {
               console.error(`Error creating embedding for chunk ${i}:`, embeddingError);
@@ -502,6 +541,8 @@ app.post('/admin/business/create-and-upload', upload.array('files', 10), async (
       }
     }
     
+    console.log('✅ All files processed successfully');
+    
     res.json({
       success: true,
       business,
@@ -520,7 +561,8 @@ app.post('/admin/business/create-and-upload', upload.array('files', 10), async (
     });
     
   } catch (error) {
-    console.error('Error creating business:', error);
+    console.error('💥 ENDPOINT ERROR:', error);
+    console.error('💥 ERROR STACK:', error.stack);
     res.status(500).json({ error: 'Failed to create business and process files' });
   }
 });
@@ -530,17 +572,18 @@ app.get('/analytics/:analyticsHash', (req, res) => {
   res.sendFile(path.resolve(__dirname, 'admin/analytics.html'));
 });
 
-app.get('/api/analytics/:analyticsHash', (req, res) => {
+// Duplicate analytics route - FIXED
+app.get('/api/analytics/:analyticsHash', async (req, res) => {
   try {
     const { analyticsHash } = req.params;
     const { days = 30 } = req.query;
     
-    const business = getBusinessByAnalyticsHash(analyticsHash);
+    const business = await getBusinessByAnalyticsHash(analyticsHash);
     if (!business) {
       return res.status(404).json({ error: 'Analytics not found' });
     }
     
-    const analytics = getBusinessAnalytics(business.id, parseInt(days));
+    const analytics = await getBusinessAnalytics(business.id, parseInt(days));
     
     res.json({
       business: {
@@ -557,7 +600,7 @@ app.get('/api/analytics/:analyticsHash', (req, res) => {
   }
 });
 
-// Legacy admin routes (for backward compatibility)
+// Legacy admin routes (for backward compatibility) - FIXED
 app.post('/admin/business/create', async (req, res) => {
   try {
     const businessData = req.body;
@@ -566,13 +609,13 @@ app.post('/admin/business/create', async (req, res) => {
       return res.status(400).json({ error: 'Business slug and name are required' });
     }
     
-    const existing = getBusinessBySlug(businessData.slug);
+    const existing = await getBusinessBySlug(businessData.slug);
     if (existing) {
       return res.status(409).json({ error: 'Business slug already exists' });
     }
     
-    const result = createBusiness(businessData);
-    const business = getBusinessById(result.id);
+    const result = await createBusiness(businessData);
+    const business = await getBusinessById(result.id);
     
     const protocol = req.headers['x-forwarded-proto'] || req.protocol;
     const host = req.get('host');
@@ -599,10 +642,10 @@ app.post('/admin/business/create', async (req, res) => {
   }
 });
 
-// List all businesses
-app.get('/admin/businesses', (req, res) => {
+// List all businesses - FIXED
+app.get('/admin/businesses', async (req, res) => {
   try {
-    const businesses = getAllBusinesses();
+    const businesses = await getAllBusinesses();
     res.json(businesses);
   } catch (error) {
     console.error('Error fetching businesses:', error);

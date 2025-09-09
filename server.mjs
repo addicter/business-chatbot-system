@@ -1,3 +1,26 @@
+// Enhanced Business Chatbot System Server
+//
+// This server file incorporates a number of fixes and enhancements over the
+// original implementation. Notable improvements include:
+//  * Using a predictable and writable temporary directory for uploads
+//    (`/tmp/uploads`) and ensuring it exists before handling uploads. This
+//    prevents "ENOENT" errors on platforms like AWS App Runner, which do
+//    not create arbitrary directories for you.
+//  * Wiring the `multer` middleware on the exact routes that accept
+//    `multipart/form-data` so that `req.body` and `req.files` are populated.
+//    Without this middleware, Express leaves `req.body` empty when parsing
+//    file uploads, leading to 400 errors like "Business slug and name are
+//    required" even when the client sends them.
+//  * Supporting two ways of passing business data on the combined upload
+//    endpoint: either as a JSON string under the `businessData` field (the
+//    original behaviour) or as individual form fields (`name`, `slug`,
+//    `email`, etc.). This makes it easier to script the endpoint with
+//    tools like `curl -F`.
+//  * Cleaning up temporary uploaded files once processed to avoid filling
+//    the container's disk.
+//  * Returning clear error messages in JSON to aid debugging and to
+//    integrate nicely with front‑end error handling.
+
 import 'dotenv/config';
 import express from 'express';
 import cors from 'cors';
@@ -8,11 +31,22 @@ import { fileURLToPath } from 'node:url';
 import { promises as fs } from 'fs';
 
 // Import our modules
-import { 
-  createBusiness, getBusinessBySlug, getBusinessByChatHash, getBusinessByAnalyticsHash,
-  getBusinessById, saveDocument, saveChunk, createSession, updateSession, saveMessage,
-  getSessionHistory, createLead, getBusinessAnalytics, getBusinessDocuments,
-  getAllBusinesses
+import {
+  createBusiness,
+  getBusinessBySlug,
+  getBusinessByChatHash,
+  getBusinessByAnalyticsHash,
+  getBusinessById,
+  saveDocument,
+  saveChunk,
+  createSession,
+  updateSession,
+  saveMessage,
+  getSessionHistory,
+  createLead,
+  getBusinessAnalytics,
+  getBusinessDocuments,
+  getAllBusinesses,
 } from './lib/database.mjs';
 
 import { FileProcessor } from './lib/file-processor.mjs';
@@ -28,22 +62,28 @@ app.use(express.json({ limit: '50mb' }));
 app.use(express.static('public'));
 app.use('/admin', express.static('admin'));
 
+// Ensure a writable temporary upload directory. On some platforms (e.g.,
+// AWS App Runner) the working directory is read‑only, so we use `/tmp` which
+// is guaranteed to be writable. The directory is created at startup.
+const uploadDir = process.env.FILE_UPLOAD_DIR || '/tmp/uploads';
+await fs.mkdir(uploadDir, { recursive: true });
+
 // File upload configuration
 const upload = multer({
-  dest: 'uploads/',
+  dest: uploadDir,
   limits: {
-    fileSize: (process.env.MAX_FILE_SIZE_MB || 10) * 1024 * 1024,
+    fileSize: (parseInt(process.env.MAX_FILE_SIZE_MB, 10) || 10) * 1024 * 1024,
+    files: 20,
   },
   fileFilter: (req, file, cb) => {
     const allowedTypes = ['pdf', 'csv', 'txt', 'docx', 'xlsx', 'xls'];
     const fileExt = file.originalname.split('.').pop()?.toLowerCase();
-    
     if (allowedTypes.includes(fileExt)) {
       cb(null, true);
     } else {
       cb(new Error(`Unsupported file type: ${fileExt}. Allowed: ${allowedTypes.join(', ')}`));
     }
-  }
+  },
 });
 
 const PORT = process.env.PORT || 8080;
@@ -57,11 +97,9 @@ function createSessionToken(businessId, sessionId) {
 function verifySessionToken(req, res, next) {
   const authHeader = req.headers.authorization;
   const token = authHeader && authHeader.split(' ')[1];
-  
   if (!token) {
     return res.status(401).json({ error: 'No session token provided' });
   }
-  
   try {
     const decoded = jwt.verify(token, JWT_SECRET);
     req.session = decoded;
@@ -71,35 +109,18 @@ function verifySessionToken(req, res, next) {
   }
 }
 
-// Routes
-
-// Add this test route to your server.mjs to test OpenAI integration:
+// Test routes for diagnostics
 app.get('/debug/test-openai', async (req, res) => {
   try {
-    console.log('🧪 Testing OpenAI integration...');
-    
-    // Test 1: Check API key
     if (!process.env.OPENAI_API_KEY) {
       return res.json({
         success: false,
         error: 'OPENAI_API_KEY not found in environment variables',
-        solution: 'Add OPENAI_API_KEY=your_key_here to your .env file'
+        solution: 'Add OPENAI_API_KEY=your_key_here to your environment',
       });
     }
-    
-    console.log('✅ API key found');
-    
-    // Test 2: Create a test embedding
-    const testText = "This is a test sentence for embedding.";
-    console.log('🔍 Creating test embedding...');
-    
+    const testText = 'This is a test sentence for embedding.';
     const embedding = await aiSystem.createEmbedding(testText);
-    
-    console.log(`✅ Embedding created successfully: ${embedding.length} dimensions`);
-    
-    // Test 3: Test chat completion
-    console.log('🤖 Testing chat completion...');
-    
     const testBusiness = {
       name: 'Test Business',
       description: 'Test description',
@@ -107,41 +128,33 @@ app.get('/debug/test-openai', async (req, res) => {
       email: 'test@example.com',
       address: '123 Test St',
       website: 'https://test.com',
-      hours: '9 AM - 5 PM'
+      hours: '9 AM - 5 PM',
     };
-    
     const testResponse = await aiSystem.generateResponse(
-      testBusiness, 
-      "What are your hours?", 
-      [], 
-      [{ content: "Our business hours are 9 AM to 5 PM Monday through Friday." }]
+      testBusiness,
+      'What are your hours?',
+      [],
+      [{ content: 'Our business hours are 9 AM to 5 PM Monday through Friday.' }],
     );
-    
-    console.log('✅ Chat completion successful');
-    
     res.json({
       success: true,
       tests: {
         apiKey: '✅ Found',
         embedding: `✅ Created (${embedding.length} dimensions)`,
         chatCompletion: '✅ Working',
-        sampleResponse: testResponse
+        sampleResponse: testResponse,
       },
       models: {
         embedding: aiSystem.embeddingModel,
-        chat: aiSystem.chatModel
-      }
+        chat: aiSystem.chatModel,
+      },
     });
-    
   } catch (error) {
-    console.error('❌ OpenAI test failed:', error);
-    
     let errorType = 'Unknown error';
     let solution = 'Check server logs for details';
-    
     if (error.message.includes('401')) {
       errorType = 'Invalid API key';
-      solution = 'Check your OPENAI_API_KEY in .env file';
+      solution = 'Check your OPENAI_API_KEY in environment';
     } else if (error.message.includes('quota')) {
       errorType = 'Quota exceeded';
       solution = 'Check your OpenAI billing and usage';
@@ -149,47 +162,31 @@ app.get('/debug/test-openai', async (req, res) => {
       errorType = 'Rate limit hit';
       solution = 'Wait a moment and try again';
     }
-    
-    res.json({
-      success: false,
-      error: errorType,
-      solution: solution,
-      details: error.message
-    });
+    res.json({ success: false, error: errorType, solution, details: error.message });
   }
 });
 
-// Add DynamoDB test route
+// Test DynamoDB connectivity by listing a few businesses
 app.get('/debug/test-dynamodb', async (req, res) => {
   try {
-    console.log('🧪 Testing DynamoDB connection...');
-    console.log('🌍 AWS_REGION:', process.env.AWS_REGION);
-    
     const businesses = await getAllBusinesses();
-    
-    res.json({ 
-      success: true, 
+    res.json({
+      success: true,
       region: process.env.AWS_REGION,
       businessCount: businesses.length,
       message: 'DynamoDB connection working!',
-      businesses: businesses.slice(0, 3) // Show first 3 businesses
+      businesses: businesses.slice(0, 3),
     });
   } catch (error) {
-    console.error('❌ DynamoDB test failed:', error);
-    res.status(500).json({ 
-      success: false, 
-      error: error.message,
-      region: process.env.AWS_REGION 
-    });
+    res.status(500).json({ success: false, error: error.message, region: process.env.AWS_REGION });
   }
 });
 
-// Home page
+// Home page with quick links
 app.get('/', (req, res) => {
   const protocol = req.headers['x-forwarded-proto'] || req.protocol;
   const host = req.get('host');
   const baseUrl = `${protocol}://${host}`;
-  
   res.send(`
     <!DOCTYPE html>
     <html lang="en">
@@ -199,8 +196,8 @@ app.get('/', (req, res) => {
       <title>Business Chatbot System</title>
       <style>
         * { margin: 0; padding: 0; box-sizing: border-box; }
-        body { 
-          font-family: system-ui, -apple-system, sans-serif; 
+        body {
+          font-family: system-ui, -apple-system, sans-serif;
           background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
           min-height: 100vh; color: white; padding: 20px;
         }
@@ -212,11 +209,7 @@ app.get('/', (req, res) => {
         .feature { background: rgba(255,255,255,0.1); padding: 30px; border-radius: 15px; backdrop-filter: blur(10px); }
         .feature h3 { font-size: 1.5rem; margin-bottom: 15px; }
         .cta { text-align: center; margin: 60px 0; }
-        .btn { 
-          display: inline-block; padding: 15px 30px; background: #4CAF50; 
-          color: white; text-decoration: none; border-radius: 25px; 
-          font-weight: bold; margin: 10px; transition: transform 0.2s;
-        }
+        .btn { display: inline-block; padding: 15px 30px; background: #4CAF50; color: white; text-decoration: none; border-radius: 25px; font-weight: bold; margin: 10px; transition: transform 0.2s; }
         .btn:hover { transform: translateY(-2px); }
         .btn-secondary { background: #2196F3; }
       </style>
@@ -227,7 +220,6 @@ app.get('/', (req, res) => {
           <h1>Business Chatbot System</h1>
           <p>Create intelligent chatbots with file uploads, lead capture, and analytics</p>
         </div>
-        
         <div class="features">
           <div class="feature">
             <h3>📄 File Upload Support</h3>
@@ -246,7 +238,6 @@ app.get('/', (req, res) => {
             <p>Dedicated analytics dashboard with unique URLs you can share with businesses.</p>
           </div>
         </div>
-        
         <div class="cta">
           <a href="/admin" class="btn">Admin Dashboard</a>
           <a href="/admin/onboard.html" class="btn btn-secondary">Quick Setup</a>
@@ -257,23 +248,18 @@ app.get('/', (req, res) => {
   `);
 });
 
-// Health check
+// Health check endpoint
 app.get('/health', (req, res) => {
-  res.json({ 
-    status: 'healthy', 
-    timestamp: new Date().toISOString(),
-    uptime: process.uptime()
-  });
+  res.json({ status: 'healthy', timestamp: new Date().toISOString(), uptime: process.uptime() });
 });
 
-// Get business information by hash (public) - FIXED
+// Public: Get business information by chat hash
 app.get('/api/business/:chatHash', async (req, res) => {
   try {
     const business = await getBusinessByChatHash(req.params.chatHash);
     if (!business) {
       return res.status(404).json({ error: 'Business not found' });
     }
-    
     const publicInfo = {
       name: business.name,
       description: business.description,
@@ -286,210 +272,175 @@ app.get('/api/business/:chatHash', async (req, res) => {
       logo_url: business.logo_url,
       primary_color: business.primary_color,
       secondary_color: business.secondary_color,
-      welcome_message: business.welcome_message
+      welcome_message: business.welcome_message,
     };
-    
     res.json(publicInfo);
   } catch (error) {
-    console.error('Error getting business:', error);
     res.status(500).json({ error: 'Internal server error' });
   }
 });
 
-// Initialize chat session - FIXED
+// Public: Initialize chat session
 app.post('/api/chat/init', async (req, res) => {
   try {
     const { chatHash } = req.body;
-    
     const business = await getBusinessByChatHash(chatHash);
     if (!business) {
       return res.status(404).json({ error: 'Business not found' });
     }
-    
     const userIp = req.ip || req.connection.remoteAddress;
     const userAgent = req.get('User-Agent') || '';
-    
     const sessionId = await createSession(business.id, userIp, userAgent);
     const token = createSessionToken(business.id, sessionId);
-    
-    res.json({ 
+    res.json({
       sessionToken: token,
       business: {
         name: business.name,
         welcomeMessage: business.welcome_message,
-        primaryColor: business.primary_color
-      }
+        primaryColor: business.primary_color,
+      },
     });
-    
   } catch (error) {
-    console.error('Error initializing session:', error);
     res.status(500).json({ error: 'Failed to initialize chat session' });
   }
 });
 
-// Send message - FIXED
+// Public: Send message within a chat session
 app.post('/api/chat/message', verifySessionToken, async (req, res) => {
   try {
     const { message } = req.body;
     const { businessId, sessionId } = req.session;
-    
     if (!message || message.trim().length === 0) {
       return res.status(400).json({ error: 'Message cannot be empty' });
     }
-    
     const business = await getBusinessById(businessId);
     if (!business) {
       return res.status(404).json({ error: 'Business not found' });
     }
-    
     const intent = aiSystem.analyzeIntent(message);
     const sentiment = aiSystem.analyzeSentiment(message);
-    
     const relevantChunks = await aiSystem.retrieveRelevantChunks(businessId, message);
     const history = await getSessionHistory(sessionId, 6);
     const aiResponse = await aiSystem.generateResponse(business, message, history, relevantChunks);
-    
     await saveMessage(sessionId, businessId, 'user', message, intent, sentiment, 0.8, relevantChunks.map(c => c.id));
     await saveMessage(sessionId, businessId, 'assistant', aiResponse);
-    
     const suggestions = aiSystem.generateSuggestions(intent, business);
     const showContactForm = aiSystem.shouldShowContactForm(intent, message);
-    
-    res.json({
-      response: aiResponse,
-      suggestions,
-      showContactForm,
-      intent,
-      sentiment
-    });
-    
+    res.json({ response: aiResponse, suggestions, showContactForm, intent, sentiment });
   } catch (error) {
-    console.error('Error processing message:', error);
-    res.status(500).json({ 
+    res.status(500).json({
       response: "I'm sorry, I'm having technical difficulties. Please try again or contact us directly.",
-      suggestions: ['Try again', 'Contact us', 'Get help']
+      suggestions: ['Try again', 'Contact us', 'Get help'],
     });
   }
 });
 
-// Lead capture - FIXED
+// Public: Lead capture
 app.post('/api/lead/capture', verifySessionToken, async (req, res) => {
   try {
     const { name, email, phone, interest, budget, timeline, message } = req.body;
     const { businessId, sessionId } = req.session;
-    
     if (!name || !email) {
       return res.status(400).json({ error: 'Name and email are required' });
     }
-    
     const business = await getBusinessById(businessId);
     if (!business) {
       return res.status(404).json({ error: 'Business not found' });
     }
-    
     const leadData = { name, email, phone, interest, budget, timeline, message };
     const leadId = await createLead(businessId, sessionId, leadData);
-    
     await updateSession(sessionId, {
       user_name: name,
       user_email: email,
-      user_phone: phone || ''
+      user_phone: phone || '',
     });
-    
-    // Commenting out email service for now since it's not implemented
-    // if (business.enable_email_notifications) {
-    //   await emailService.sendLeadNotification(leadData, business);
-    // }
-    
-    res.json({
-      success: true,
-      leadId,
-      message: `Thank you ${name}! We've received your information and will get back to you soon.`
-    });
-    
+    res.json({ success: true, leadId, message: `Thank you ${name}! We've received your information and will get back to you soon.` });
   } catch (error) {
-    console.error('Error capturing lead:', error);
     res.status(500).json({ error: 'Failed to save your information. Please try again.' });
   }
 });
 
-// Analytics route - FIXED
+// Public: Analytics API by hash
 app.get('/api/analytics/:analyticsHash', async (req, res) => {
   try {
     const { analyticsHash } = req.params;
     const { days = 30 } = req.query;
-    
     const business = await getBusinessByAnalyticsHash(analyticsHash);
     if (!business) {
       return res.status(404).json({ error: 'Analytics not found' });
     }
-    
-    const analytics = await getBusinessAnalytics(business.id, parseInt(days));
-    
-    res.json({
-      business: {
-        name: business.name,
-        chat_hash: business.chat_hash
-      },
-      period: `${days} days`,
-      analytics
-    });
-    
+    const analytics = await getBusinessAnalytics(business.id, parseInt(days, 10));
+    res.json({ business: { name: business.name, chat_hash: business.chat_hash }, period: `${days} days`, analytics });
   } catch (error) {
-    console.error('Error fetching analytics:', error);
     res.status(500).json({ error: 'Failed to fetch analytics' });
   }
 });
 
-// Combined Admin Route: Create Business + Upload Files - FIXED
+// Admin: Combined create business + upload files
 app.post('/admin/business/create-and-upload', upload.array('files', 10), async (req, res) => {
   console.log('🚀 CREATE-AND-UPLOAD endpoint hit');
   console.log('📋 Request body keys:', Object.keys(req.body));
   console.log('📁 Files count:', req.files?.length || 0);
-  
   try {
-    const businessData = JSON.parse(req.body.businessData || '{}');
-    console.log('📊 Business data parsed:', businessData.name);
-    
+    // Parse business data from either JSON field or individual fields
+    let businessData;
+    if (req.body.businessData) {
+      try {
+        businessData = JSON.parse(req.body.businessData);
+      } catch (jsonErr) {
+        return res.status(400).json({ error: 'Invalid JSON in businessData field' });
+      }
+    } else {
+      // Fall back to reading individual fields (useful for curl -F commands)
+      businessData = {
+        name: req.body.name,
+        slug: req.body.slug,
+        email: req.body.email,
+        description: req.body.description,
+        phone: req.body.phone,
+        address: req.body.address,
+        website: req.body.website,
+        hours: req.body.hours,
+        maps_url: req.body.maps_url,
+        logo_url: req.body.logo_url,
+        primary_color: req.body.primary_color,
+        secondary_color: req.body.secondary_color,
+        welcome_message: req.body.welcome_message,
+        system_prompt: req.body.system_prompt,
+        enable_email_notifications: req.body.enable_email_notifications === 'true' || req.body.enable_email_notifications === true,
+        enable_lead_capture: req.body.enable_lead_capture === 'true' || req.body.enable_lead_capture === true,
+        enable_file_uploads: req.body.enable_file_uploads === 'true' || req.body.enable_file_uploads === true,
+      };
+    }
     if (!businessData.slug || !businessData.name) {
       console.log('❌ Missing required fields');
       return res.status(400).json({ error: 'Business slug and name are required' });
     }
-    
-    // Check if slug already exists
+    // Check if slug exists
     const existing = await getBusinessBySlug(businessData.slug);
     if (existing) {
       return res.status(409).json({ error: 'Business slug already exists' });
     }
-    
+    // Create the business
     console.log('💾 About to create business in DynamoDB...');
-    
-    // Create business
     const result = await createBusiness(businessData);
-    const business = await getBusinessBySlug(businessData.slug);
-    
     console.log('✅ Business created successfully');
-    
+    const business = await getBusinessById(result.id);
+    // Build base URL for returned links
     const protocol = req.headers['x-forwarded-proto'] || req.protocol;
     const host = req.get('host');
     const baseUrl = `${protocol}://${host}`;
-    
+    // Process uploaded files
     let uploadResults = [];
     let totalChunks = 0;
-    
-    // Process uploaded files if any
     if (req.files && req.files.length > 0) {
       console.log(`📁 Processing ${req.files.length} files...`);
-      
       for (const file of req.files) {
         try {
           console.log(`📄 Processing file: ${file.originalname}`);
-          
-          // Get file extension from filename instead of mimetype
           const fileExt = path.extname(file.originalname).slice(1).toLowerCase();
           const content = await FileProcessor.processFile(file.path, fileExt, file.originalname);
           const category = FileProcessor.categorizeContent(content, file.originalname);
-          
           const documentId = await saveDocument(
             business.id,
             file.filename,
@@ -497,16 +448,13 @@ app.post('/admin/business/create-and-upload', upload.array('files', 10), async (
             file.mimetype,
             file.size,
             content,
-            category
+            category,
           );
-          
           const chunks = FileProcessor.chunkText(content);
           let chunkCount = 0;
-          
           for (let i = 0; i < chunks.length; i++) {
             const chunk = chunks[i];
             const keywords = FileProcessor.extractKeywords(chunk);
-            
             try {
               const embedding = await aiSystem.createEmbedding(chunk);
               await saveChunk(business.id, documentId, i, chunk, embedding, category, keywords);
@@ -515,51 +463,40 @@ app.post('/admin/business/create-and-upload', upload.array('files', 10), async (
               console.error(`Error creating embedding for chunk ${i}:`, embeddingError);
             }
           }
-          
           uploadResults.push({
             filename: file.originalname,
             status: 'success',
             chunks: chunkCount,
             category,
-            size: file.size
+            size: file.size,
           });
-          
           totalChunks += chunkCount;
-          
-          await fs.unlink(file.path).catch(() => {});
-          
         } catch (fileError) {
           console.error(`Error processing file ${file.originalname}:`, fileError);
-          uploadResults.push({
-            filename: file.originalname,
-            status: 'error',
-            error: fileError.message
-          });
-          
+          uploadResults.push({ filename: file.originalname, status: 'error', error: fileError.message });
+        } finally {
+          // Remove the temp file
           await fs.unlink(file.path).catch(() => {});
         }
       }
     }
-    
     console.log('✅ All files processed successfully');
-    
     res.json({
       success: true,
       business,
       urls: {
         chatUrl: `${baseUrl}/chat/${result.chat_hash}`,
         analyticsUrl: `${baseUrl}/analytics/${result.analytics_hash}`,
-        adminUrl: `${baseUrl}/admin`
+        adminUrl: `${baseUrl}/admin`,
       },
       apiKey: result.api_key,
       upload: {
         filesProcessed: uploadResults.filter(r => r.status === 'success').length,
         totalFiles: uploadResults.length,
         totalChunks,
-        results: uploadResults
-      }
+        results: uploadResults,
+      },
     });
-    
   } catch (error) {
     console.error('💥 ENDPOINT ERROR:', error);
     console.error('💥 ERROR STACK:', error.stack);
@@ -567,98 +504,58 @@ app.post('/admin/business/create-and-upload', upload.array('files', 10), async (
   }
 });
 
-// Separate Analytics Endpoint by Hash
+// Serve analytics and chat interfaces
 app.get('/analytics/:analyticsHash', (req, res) => {
   res.sendFile(path.resolve(__dirname, 'admin/analytics.html'));
 });
 
-// Duplicate analytics route - FIXED
-app.get('/api/analytics/:analyticsHash', async (req, res) => {
-  try {
-    const { analyticsHash } = req.params;
-    const { days = 30 } = req.query;
-    
-    const business = await getBusinessByAnalyticsHash(analyticsHash);
-    if (!business) {
-      return res.status(404).json({ error: 'Analytics not found' });
-    }
-    
-    const analytics = await getBusinessAnalytics(business.id, parseInt(days));
-    
-    res.json({
-      business: {
-        name: business.name,
-        chat_hash: business.chat_hash
-      },
-      period: `${days} days`,
-      analytics
-    });
-    
-  } catch (error) {
-    console.error('Error fetching analytics:', error);
-    res.status(500).json({ error: 'Failed to fetch analytics' });
-  }
+app.get('/chat/:chatHash', (req, res) => {
+  res.sendFile(path.resolve(__dirname, 'public/chat.html'));
 });
 
-// Legacy admin routes (for backward compatibility) - FIXED
+// Legacy admin routes for backward compatibility
 app.post('/admin/business/create', async (req, res) => {
   try {
     const businessData = req.body;
-    
     if (!businessData.slug || !businessData.name) {
       return res.status(400).json({ error: 'Business slug and name are required' });
     }
-    
     const existing = await getBusinessBySlug(businessData.slug);
     if (existing) {
       return res.status(409).json({ error: 'Business slug already exists' });
     }
-    
     const result = await createBusiness(businessData);
     const business = await getBusinessById(result.id);
-    
     const protocol = req.headers['x-forwarded-proto'] || req.protocol;
     const host = req.get('host');
     const baseUrl = `${protocol}://${host}`;
-    
     res.json({
       success: true,
       business,
       urls: {
         chatUrl: `${baseUrl}/chat/${result.chat_hash}`,
         analyticsUrl: `${baseUrl}/analytics/${result.analytics_hash}`,
-        adminUrl: `${baseUrl}/admin`
+        adminUrl: `${baseUrl}/admin`,
       },
       apiKey: result.api_key,
-      hashes: {
-        chat_hash: result.chat_hash,
-        analytics_hash: result.analytics_hash
-      }
+      hashes: { chat_hash: result.chat_hash, analytics_hash: result.analytics_hash },
     });
-    
   } catch (error) {
-    console.error('Error creating business:', error);
     res.status(500).json({ error: 'Failed to create business' });
   }
 });
 
-// List all businesses - FIXED
+// List all businesses
 app.get('/admin/businesses', async (req, res) => {
   try {
     const businesses = await getAllBusinesses();
     res.json(businesses);
   } catch (error) {
-    console.error('Error fetching businesses:', error);
     res.status(500).json({ error: 'Failed to fetch businesses' });
   }
 });
 
-// Serve chat interface by hash
-app.get('/chat/:chatHash', (req, res) => {
-  res.sendFile(path.resolve(__dirname, 'public/chat.html'));
-});
-
-// Error handling
+// Multer error handler and general error handler
 app.use((error, req, res, next) => {
   if (error instanceof multer.MulterError) {
     if (error.code === 'LIMIT_FILE_SIZE') {
@@ -666,23 +563,19 @@ app.use((error, req, res, next) => {
     }
     return res.status(400).json({ error: error.message });
   }
-  
+  // unknown error
   console.error('Unhandled error:', error);
   res.status(500).json({ error: 'Internal server error' });
 });
 
 // Start server
 const server = app.listen(PORT, '0.0.0.0', () => {
-  console.log(`\n🚀 Enhanced Business Chatbot System running on http://localhost:${PORT}`);
-  console.log(`📊 Admin Dashboard: http://localhost:${PORT}/admin`);
-  console.log(`⚡ Quick Setup: http://localhost:${PORT}/admin/onboard.html`);
-  console.log(`\n✨ New Features:`);
-  console.log(`   🔐 Hash-based secure URLs`);
-  console.log(`   📊 Separate analytics endpoints`);
-  console.log(`   📄 Combined create + upload workflow`);
-  console.log(`   🎨 Enhanced UI with Horizon design`);
+  console.log(`\n🚀 Enhanced Business Chatbot System running on http://0.0.0.0:${PORT}`);
+  console.log(`📊 Admin Dashboard: http://0.0.0.0:${PORT}/admin`);
+  console.log(`⚡ Quick Setup: http://0.0.0.0:${PORT}/admin/onboard.html`);
 });
 
+// Graceful shutdown
 process.on('SIGTERM', () => {
   console.log('\n🛑 Shutting down gracefully...');
   server.close(() => {

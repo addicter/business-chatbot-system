@@ -431,7 +431,7 @@ app.post('/admin/business/create-and-upload', upload.array('files', 10), async (
     const business = await getBusinessById(result.id);
     // Build base URL for returned links
     const protocol = req.headers['x-forwarded-proto'] || req.protocol;
-    const host = req.get('host');
+    const host = process.env.CUSTOM_DOMAIN || req.get('host'); // ← Use custom domain if set
     const baseUrl = `${protocol}://${host}`;
     // Process uploaded files with PARALLEL PROCESSING TO PREVENT TIMEOUTS
     let uploadResults = [];

@@ -242,8 +242,7 @@ app.get('/', (req, res) => {
           </div>
         </div>
         <div class="cta">
-          <a href="/admin" class="btn">Admin Dashboard</a>
-          <a href="/admin/onboard.html" class="btn btn-secondary">Quick Setup</a>
+          <a href="/admin" class="btn">Create Bot</a>
         </div>
       </div>
     </body>

@@ -179,6 +179,10 @@
 
       <div class="grid" style="margin-top:14px">
         <div class="field">
+          <!-- hidden file input to trigger native file picker -->
+          <input id="file-input" type="file" multiple accept=".pdf,.csv,.txt,.docx,.xlsx,.xls"
+                 style="position:absolute;width:0.1px;height:0.1px;opacity:0;overflow:hidden;z-index:-1;" />
+
           <div id="dz" class="drop" tabindex="0" role="button" aria-describedby="dz-hint" aria-label="Upload documents (drop files here or choose files)">
             <div>
               <svg width="36" height="36" viewBox="0 0 24 24" aria-hidden="true">
@@ -187,10 +191,10 @@
               </svg>
               <p style="margin:6px 0 4px; font-weight:600">Drop files here</p>
               <p class="muted text-sm" style="margin:0">or</p>
-              <button id="pick" type="button" class="pick-btn">Choose files</button>
+              <!-- label triggers file picker when clicked -->
+              <label id="pick" for="file-input" class="pick-btn" role="button">Choose files</label>
             </div>
             <p id="dz-hint" class="help" style="margin-top:10px">You can also paste files here.</p>
-            <input id="file-input" type="file" multiple accept=".pdf,.csv,.txt,.docx,.xlsx,.xls" style="position:absolute;opacity:0;pointer-events:none;width:1px;height:1px;" aria-hidden="true" />
           </div>
 
           <div class="actions" style="margin-top:10px">
@@ -255,7 +259,7 @@
     let submitting = false;
 
     // --- Helpers ---
-    const ext = (name) => (name.toLowerCase().match(/\\.([a-z0-9]+)$/)||[])[1] || "";
+    const ext = (name) => (name.toLowerCase().match(/\.([a-z0-9]+)$/)||[])[1] || "";
     const mb = (bytes) => Math.round((bytes/1048576)*10)/10;
     const totalMB = () => files.reduce((a,f)=>a+mb(f.file.size),0);
     const say = (msg, type=""){ live.textContent = msg; live.className = "status" + (type ? " "+type : ""); };
@@ -273,7 +277,7 @@
 
       setError(nameEl, nameErr, name ? "" : "Business name is required.");
       setError(slugEl, slugErr, !slug ? "Slug is required." : (/^[-a-z0-9]+$/i.test(slug) ? "" : "Use only letters, numbers, and hyphens."));
-      setError(emailEl, emailErr, email && !/\\S+@\\S+\\.\\S+/.test(email) ? "Enter a valid email." : "");
+      setError(emailEl, emailErr, email && !/\S+@\S+\.\S+/.test(email) ? "Enter a valid email." : "");
 
       const tot = totalMB();
       totals.textContent = `Total: ${tot} MB (limit ${MAX_MB} MB)`;
@@ -313,45 +317,108 @@
         add.push({ file:f, id: `${f.name}-${f.size}-${Date.now()}-${Math.random().toString(36).slice(2)}` });
       }
       if(add.length){ files = files.concat(add); renderFiles(); validateFields(); }
-      if(errs.length){ say(errs.join("\\n"), "error"); }
+      if(errs.length){ say(errs.join("\n"), "error"); }
     }
 
-    // --- Events: choose, drop, paste ---
-    pick.addEventListener('click', ()=> input.click());
-    dz.addEventListener('keydown', (e)=>{ if(e.key==="Enter" || e.key===" "){ e.preventDefault(); input.click(); }});
-    dz.addEventListener('dragover', (e)=>{ e.preventDefault(); dz.classList.add('hover'); });
-    dz.addEventListener('dragleave', ()=> dz.classList.remove('hover'));
-    dz.addEventListener('drop', (e)=>{ e.preventDefault(); dz.classList.remove('hover'); if(submitting) return; if(e.dataTransfer.files?.length) addFiles(e.dataTransfer.files); });
-    dz.addEventListener('paste', (e)=>{ if(submitting) return; const items = e.clipboardData?.files; if(items?.length) addFiles(items); });
-
-    input.addEventListener('change', (e)=>{ if(e.target.files?.length) addFiles(e.target.files); e.target.value = ""; });
-
-    fileList.addEventListener('click', (e)=>{
-      const btn = e.target.closest('.remove'); if(!btn) return;
-      const row = btn.closest('.fileitem'); const id = row?.getAttribute('data-id');
-      files = files.filter(f=>f.id !== id); renderFiles(); validateFields();
+    // --- Events: open picker with label ---
+    // When user clicks the drop area (not on label) open picker
+    dz.addEventListener('click', (e) => {
+      // If click target is the label or inside the label, let the label handle it
+      if(e.target.tagName.toLowerCase() !== 'label'){
+        input.click();
+      }
+    });
+    // When user presses Enter or Space on drop area, open picker
+    dz.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter' || e.key === ' ') {
+        e.preventDefault();
+        input.click();
+      }
     });
 
-    clearAll.addEventListener('click', ()=>{ files = []; renderFiles(); validateFields(); });
+    // Drag & drop events
+    ['dragenter','dragover'].forEach(evt => {
+      dz.addEventListener(evt, (e) => {
+        e.preventDefault();
+        if(e.dataTransfer) e.dataTransfer.dropEffect = 'copy';
+        dz.classList.add('hover');
+      });
+    });
+    ['dragleave','drop'].forEach(evt => {
+      dz.addEventListener(evt, () => dz.classList.remove('hover'));
+    });
+    dz.addEventListener('drop', (e) => {
+      e.preventDefault();
+      if(submitting) return;
+      const fl = e.dataTransfer?.files;
+      if(fl && fl.length) addFiles(fl);
+    });
 
-    // Inline validation on blur / input
+    // Paste support
+    dz.addEventListener('paste', (e) => {
+      if(submitting) return;
+      const fl = e.clipboardData?.files;
+      if(fl && fl.length) addFiles(fl);
+    });
+
+    // Native file picker
+    input.addEventListener('change', (e) => {
+      const fl = e.target.files;
+      if(fl && fl.length) addFiles(fl);
+      e.target.value = '';
+    });
+
+    // Prevent default on document drop to avoid navigation
+    document.addEventListener('dragover', (e) => e.preventDefault());
+    document.addEventListener('drop', (e) => e.preventDefault());
+
+    // Remove file
+    fileList.addEventListener('click', (e) => {
+      const btn = e.target.closest('.remove');
+      if(!btn) return;
+      const row = btn.closest('.fileitem');
+      const id = row?.getAttribute('data-id');
+      files = files.filter(f => f.id !== id);
+      renderFiles();
+      validateFields();
+    });
+
+    // Clear all files
+    clearAll.addEventListener('click', () => {
+      files = [];
+      renderFiles();
+      validateFields();
+    });
+
+    // Inline validation events
     nameEl.addEventListener('blur', validateFields);
-    slugEl.addEventListener('input', ()=>{ slugEl.value = slugEl.value.replace(/[^-a-z0-9]/ig,''); validateFields(); });
+    slugEl.addEventListener('input', () => {
+      slugEl.value = slugEl.value.replace(/[^-a-z0-9]/ig,'');
+      validateFields();
+    });
     slugEl.addEventListener('blur', validateFields);
     emailEl.addEventListener('blur', validateFields);
 
-    // --- Submit with XHR progress ---
-    submitBtn.addEventListener('click', async ()=>{
-      say(""); result.style.display="none";
-      if(!validateFields()){ say("Please fix validation errors before submitting.", "error"); return; }
-      if(files.length===0){ say("Please add at least one file.", "error"); return; }
+    // Submit with XHR
+    submitBtn.addEventListener('click', async () => {
+      say('');
+      result.style.display = 'none';
+      if(!validateFields()){
+        say('Please fix validation errors before submitting.', 'error');
+        return;
+      }
+      if(files.length === 0){
+        say('Please add at least one file.', 'error');
+        return;
+      }
 
       submitting = true;
       submitBtn.disabled = true;
       clearAll.disabled = true;
 
-      progressWrap.style.display = "";
-      bar.style.width = "0%"; pct.textContent = "0%";
+      progressWrap.style.display = '';
+      bar.style.width = '0%';
+      pct.textContent = '0%';
 
       try{
         const fd = new FormData();
@@ -360,61 +427,70 @@
           slug: slugEl.value.trim(),
           email: emailEl.value.trim()
         };
-        fd.append("businessData", JSON.stringify(businessData));
-        for(const {file} of files) fd.append("files", file, file.name);
+        fd.append('businessData', JSON.stringify(businessData));
+        for(const {file} of files) fd.append('files', file, file.name);
 
         const xhr = new XMLHttpRequest();
-        xhr.open("POST", "/admin/business/create-and-upload");
+        xhr.open('POST', '/admin/business/create-and-upload');
 
-        xhr.upload.addEventListener("progress", (e)=>{
+        xhr.upload.addEventListener('progress', (e) => {
           if(e.lengthComputable){
-            const p = Math.round((e.loaded/e.total)*100);
-            bar.style.width = p + "%";
-            pct.textContent = p + "%";
+            const p = Math.round((e.loaded / e.total) * 100);
+            bar.style.width = p + '%';
+            pct.textContent = p + '%';
           }
         });
 
-        xhr.onreadystatechange = ()=>{
+        xhr.onreadystatechange = () => {
           if(xhr.readyState !== 4) return;
           let data = null;
-          try{ data = JSON.parse(xhr.responseText); } catch(_){}
+          try { data = JSON.parse(xhr.responseText); } catch(_){ }
           if(xhr.status < 200 || xhr.status >= 300 || !data || !data.success){
             const err = data?.error || xhr.responseText || `HTTP ${xhr.status}`;
-            say("Upload failed: " + err, "error");
-            progressWrap.style.display = "none";
-            submitting = false; submitBtn.disabled=false; validateFields();
+            say('Upload failed: ' + err, 'error');
+            progressWrap.style.display = 'none';
+            submitting = false;
+            submitBtn.disabled = false;
+            validateFields();
             return;
           }
           const chatUrl = data.urls?.chatUrl;
           const analyticsUrl = data.urls?.analyticsUrl;
           const filesProcessed = data.upload?.filesProcessed ?? 0;
 
-          say(`Success! Processed ${filesProcessed} file${filesProcessed===1?"":"s"}.`, "success");
-          result.style.display = "";
+          say(`Success! Processed ${filesProcessed} file${filesProcessed===1?'':'s'}.`, 'success');
+          result.style.display = '';
           result.innerHTML = `
             <strong>You're all set.</strong>
             <div class="text-sm" style="margin-top:6px">Quick links for your new business:</div>
             <ul class="text-sm" style="margin:6px 0 0 16px">
-              ${chatUrl ? `<li><a href="${chatUrl}" target="_blank" rel="noopener noreferrer">Open Chat</a></li>` : ""}
-              ${analyticsUrl ? `<li><a href="${analyticsUrl}" target="_blank" rel="noopener noreferrer">Open Analytics</a></li>` : ""}
+              ${chatUrl ? `<li><a href="${chatUrl}" target="_blank" rel="noopener noreferrer">Open Chat</a></li>` : ''}
+              ${analyticsUrl ? `<li><a href="${analyticsUrl}" target="_blank" rel="noopener noreferrer">Open Analytics</a></li>` : ''}
             </ul>
           `;
-          // optional: files = []; renderFiles();
-          submitting = false; submitBtn.disabled=false; validateFields();
-          // keep progress at 100% for a moment
-          bar.style.width="100%"; pct.textContent="100%";
-          setTimeout(()=>{ progressWrap.style.display="none"; }, 800);
+          submitting = false;
+          submitBtn.disabled = false;
+          validateFields();
+          bar.style.width = '100%';
+          pct.textContent = '100%';
+          setTimeout(() => { progressWrap.style.display = 'none'; }, 800);
         };
 
-        xhr.onerror = ()=>{
-          say("Network error while uploading.", "error");
-          submitting = false; submitBtn.disabled=false; progressWrap.style.display = "none"; validateFields();
+        xhr.onerror = () => {
+          say('Network error while uploading.', 'error');
+          submitting = false;
+          submitBtn.disabled = false;
+          progressWrap.style.display = 'none';
+          validateFields();
         };
 
         xhr.send(fd);
       } catch(err){
-        say("Unexpected error: " + err.message, "error");
-        submitting = false; submitBtn.disabled=false; progressWrap.style.display = "none"; validateFields();
+        say('Unexpected error: ' + err.message, 'error');
+        submitting = false;
+        submitBtn.disabled = false;
+        progressWrap.style.display = 'none';
+        validateFields();
       }
     });
 

@@ -747,28 +747,22 @@
                 if (result.success) {
                     results.innerHTML = `
                         <div class="result-card result-success">
-                            <h3 style="margin: 0 0 1rem; color: var(--success);">✅ Success! Your chatbot is ready</h3>
+                            <h3 style="margin: 0 0 1.5rem; color: var(--success); font-size: 1.25rem;">Success! Your chatbot is ready</h3>
                             
-                            <div style="margin-bottom: 1rem;">
-                                <h4>🔗 Chat URL</h4>
+                            <div style="margin-bottom: 1.5rem;">
+                                <h4 style="margin: 0 0 0.5rem; font-size: 1rem; color: var(--text-primary);">Chat URL</h4>
                                 <div class="url-display">
                                     <span>${result.urls.chatUrl}</span>
                                     <button class="copy-btn" onclick="copyToClipboard('${result.urls.chatUrl}', this)">Copy</button>
                                 </div>
                             </div>
-
-                            <div style="margin-bottom: 1rem;">
-                                <h4>📊 Analytics URL</h4>
+                
+                            <div>
+                                <h4 style="margin: 0 0 0.5rem; font-size: 1rem; color: var(--text-primary);">Analytics URL</h4>
                                 <div class="url-display">
                                     <span>${result.urls.analyticsUrl}</span>
                                     <button class="copy-btn" onclick="copyToClipboard('${result.urls.analyticsUrl}', this)">Copy</button>
                                 </div>
-                            </div>
-
-                            <div>
-                                <h4>📁 Upload Summary</h4>
-                                <p>Files processed: ${result.upload.filesProcessed}/${result.upload.totalFiles}</p>
-                                <p>AI chunks created: ${result.upload.totalChunks}</p>
                             </div>
                         </div>
                     `;

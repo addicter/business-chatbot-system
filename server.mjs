@@ -1,652 +1,383 @@
-// Enhanced Business Chatbot System Server
-//
-// This server file incorporates a number of fixes and enhancements over the
-// original implementation. Notable improvements include:
-//  * Using a predictable and writable temporary directory for uploads
-//    (`/tmp/uploads`) and ensuring it exists before handling uploads. This
-//    prevents "ENOENT" errors on platforms like AWS App Runner, which do
-//    not create arbitrary directories for you.
-//  * Wiring the `multer` middleware on the exact routes that accept
-//    `multipart/form-data` so that `req.body` and `req.files` are populated.
-//    Without this middleware, Express leaves `req.body` empty when parsing
-//    file uploads, leading to 400 errors like "Business slug and name are
-//    required" even when the client sends them.
-//  * Supporting two ways of passing business data on the combined upload
-//    endpoint: either as a JSON string under the `businessData` field (the
-//    original behaviour) or as individual form fields (`name`, `slug`,
-//    `email`, etc.). This makes it easier to script the endpoint with
-//    tools like `curl -F`.
-//  * Cleaning up temporary uploaded files once processed to avoid filling
-//    the container's disk.
-//  * Returning clear error messages in JSON to aid debugging and to
-//    integrate nicely with front‑end error handling.
-//  * PARALLEL CHUNK PROCESSING: Fixed timeout issues by processing file chunks
-//    in parallel batches instead of sequentially, with timeout protection
-//    and chunk limiting to stay under App Runner's 120-second request limit.
-
-import 'dotenv/config';
-import express from 'express';
-import cors from 'cors';
-import jwt from 'jsonwebtoken';
-import multer from 'multer';
-import path from 'path';
-import { fileURLToPath } from 'node:url';
-import { promises as fs } from 'fs';
-
-// Import our modules
-import {
-  createBusiness,
-  getBusinessBySlug,
-  getBusinessByChatHash,
-  getBusinessByAnalyticsHash,
-  getBusinessById,
-  saveDocument,
-  saveChunk,
-  createSession,
-  updateSession,
-  saveMessage,
-  getSessionHistory,
-  createLead,
-  getBusinessAnalytics,
-  getBusinessDocuments,
-  getAllBusinesses,
-} from './lib/database.mjs';
-
-import { FileProcessor } from './lib/file-processor.mjs';
-import { aiSystem } from './lib/ai-system.mjs';
-//import { emailService } from './lib/email-service.mjs';
-
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const app = express();
-
-// Middleware
-app.use(cors());
-app.use(express.json({ limit: '50mb' }));
-app.use(express.static('public'));
-app.use('/admin', express.static('admin'));
-
-// Ensure a writable temporary upload directory. On some platforms (e.g.,
-// AWS App Runner) the working directory is read‑only, so we use `/tmp` which
-// is guaranteed to be writable. The directory is created at startup.
-const uploadDir = process.env.FILE_UPLOAD_DIR || '/tmp/uploads';
-await fs.mkdir(uploadDir, { recursive: true });
-
-// File upload configuration
-const upload = multer({
-  dest: uploadDir,
-  limits: {
-    fileSize: (parseInt(process.env.MAX_FILE_SIZE_MB, 10) || 10) * 1024 * 1024,
-    files: 20,
-  },
-  fileFilter: (req, file, cb) => {
-    const allowedTypes = ['pdf', 'csv', 'txt', 'docx', 'xlsx', 'xls'];
-    const fileExt = file.originalname.split('.').pop()?.toLowerCase();
-    if (allowedTypes.includes(fileExt)) {
-      cb(null, true);
-    } else {
-      cb(new Error(`Unsupported file type: ${fileExt}. Allowed: ${allowedTypes.join(', ')}`));
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Business Chatbot System — 2025</title>
+  <meta name="description" content="Create intelligent chatbots with file uploads, lead capture, and analytics." />
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      --bg: #0b1020; /* base background */
+      --bg-muted: #0e1327;
+      --card: rgba(255, 255, 255, 0.06);
+      --card-hover: rgba(255, 255, 255, 0.1);
+      --text: #e8ecff;
+      --muted: #a5b0d6;
+      --brand-1: #7c4dff; /* hyper purple */
+      --brand-2: #00d4ff; /* neon cyan */
+      --ok: #30d158;
+      --warn: #ffd60a;
+      --danger: #ff453a;
+      --radius: 18px;
+      --shadow-1: 0 10px 30px rgba(0,0,0,0.35);
     }
-  },
-});
 
-const PORT = process.env.PORT || 8080;
-const JWT_SECRET = process.env.APP_JWT_SECRET || 'your_secret_key';
-const SESSION_TIMEOUT = (process.env.SESSION_TIMEOUT_HOURS || 2) + 'h';
-
-function createSessionToken(businessId, sessionId) {
-  return jwt.sign({ businessId, sessionId }, JWT_SECRET, { expiresIn: SESSION_TIMEOUT });
-}
-
-function verifySessionToken(req, res, next) {
-  const authHeader = req.headers.authorization;
-  const token = authHeader && authHeader.split(' ')[1];
-  if (!token) {
-    return res.status(401).json({ error: 'No session token provided' });
-  }
-  try {
-    const decoded = jwt.verify(token, JWT_SECRET);
-    req.session = decoded;
-    next();
-  } catch (error) {
-    return res.status(401).json({ error: 'Invalid or expired session token' });
-  }
-}
-
-// Test routes for diagnostics
-app.get('/debug/test-openai', async (req, res) => {
-  try {
-    if (!process.env.OPENAI_API_KEY) {
-      return res.json({
-        success: false,
-        error: 'OPENAI_API_KEY not found in environment variables',
-        solution: 'Add OPENAI_API_KEY=your_key_here to your environment',
-      });
+    /* Light theme */
+    :root.light {
+      --bg: #f7f9ff;
+      --bg-muted: #eef2ff;
+      --card: rgba(14, 19, 39, 0.05);
+      --card-hover: rgba(14, 19, 39, 0.09);
+      --text: #0b1020;
+      --muted: #42507a;
+      --shadow-1: 0 10px 30px rgba(20,40,120,0.12);
     }
-    const testText = 'This is a test sentence for embedding.';
-    const embedding = await aiSystem.createEmbedding(testText);
-    const testBusiness = {
-      name: 'Test Business',
-      description: 'Test description',
-      phone: '123-456-7890',
-      email: 'test@example.com',
-      address: '123 Test St',
-      website: 'https://test.com',
-      hours: '9 AM - 5 PM',
-    };
-    const testResponse = await aiSystem.generateResponse(
-      testBusiness,
-      'What are your hours?',
-      [],
-      [{ content: 'Our business hours are 9 AM to 5 PM Monday through Friday.' }],
-    );
-    res.json({
-      success: true,
-      tests: {
-        apiKey: '✅ Found',
-        embedding: `✅ Created (${embedding.length} dimensions)`,
-        chatCompletion: '✅ Working',
-        sampleResponse: testResponse,
-      },
-      models: {
-        embedding: aiSystem.embeddingModel,
-        chat: aiSystem.chatModel,
-      },
-    });
-  } catch (error) {
-    let errorType = 'Unknown error';
-    let solution = 'Check server logs for details';
-    if (error.message.includes('401')) {
-      errorType = 'Invalid API key';
-      solution = 'Check your OPENAI_API_KEY in environment';
-    } else if (error.message.includes('quota')) {
-      errorType = 'Quota exceeded';
-      solution = 'Check your OpenAI billing and usage';
-    } else if (error.message.includes('rate limit')) {
-      errorType = 'Rate limit hit';
-      solution = 'Wait a moment and try again';
+
+    * { box-sizing: border-box; }
+    html, body { height: 100%; }
+    body {
+      margin: 0;
+      font-family: Inter, system-ui, -apple-system, Segoe UI, Roboto, "Helvetica Neue", Arial, "Noto Sans", "Apple Color Emoji", "Segoe UI Emoji";
+      color: var(--text);
+      background: radial-gradient(1200px 800px at 10% -10%, rgba(124,77,255,0.25), transparent 40%),
+                  radial-gradient(800px 600px at 110% 10%, rgba(0,212,255,0.25), transparent 40%),
+                  linear-gradient(180deg, var(--bg) 0%, var(--bg-muted) 100%);
+      overflow-x: hidden;
     }
-    res.json({ success: false, error: errorType, solution, details: error.message });
-  }
-});
 
-// Test DynamoDB connectivity by listing a few businesses
-app.get('/debug/test-dynamodb', async (req, res) => {
-  try {
-    const businesses = await getAllBusinesses();
-    res.json({
-      success: true,
-      region: process.env.AWS_REGION,
-      businessCount: businesses.length,
-      message: 'DynamoDB connection working!',
-      businesses: businesses.slice(0, 3),
-    });
-  } catch (error) {
-    res.status(500).json({ success: false, error: error.message, region: process.env.AWS_REGION });
-  }
-});
+    /* Animated aurora bands */
+    .aurora {
+      position: fixed; inset: -30vmax; pointer-events: none; filter: blur(40px); opacity: .55;
+      background: conic-gradient(from 180deg at 50% 50%, rgba(124,77,255,.35), rgba(0,212,255,.28), rgba(124,77,255,.35));
+      animation: swirl 18s linear infinite;
+      transform-origin: 50% 50%;
+      z-index: 0;
+    }
+    @keyframes swirl { to { transform: rotate(360deg) scale(1.02); } }
 
-// Home page with quick links
-app.get('/', (req, res) => {
-  const protocol = req.headers['x-forwarded-proto'] || req.protocol;
-  const host = req.get('host');
-  const baseUrl = `${protocol}://${host}`;
-  res.send(`
-    <!DOCTYPE html>
-    <html lang="en">
-    <head>
-      <meta charset="UTF-8">
-      <meta name="viewport" content="width=device-width, initial-scale=1.0">
-      <title>Business Chatbot System</title>
-      <style>
-        * { margin: 0; padding: 0; box-sizing: border-box; }
-        body {
-          font-family: system-ui, -apple-system, sans-serif;
-          background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-          min-height: 100vh; color: white; padding: 20px;
-        }
-        .container { max-width: 1200px; margin: 0 auto; }
-        .hero { text-align: center; padding: 60px 0; }
-        .hero h1 { font-size: 3rem; margin-bottom: 20px; }
-        .hero p { font-size: 1.2rem; opacity: 0.9; margin-bottom: 40px; }
-        .features { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 30px; margin: 60px 0; }
-        .feature { background: rgba(255,255,255,0.1); padding: 30px; border-radius: 15px; backdrop-filter: blur(10px); }
-        .feature h3 { font-size: 1.5rem; margin-bottom: 15px; }
-        .cta { text-align: center; margin: 60px 0; }
-        .btn { display: inline-block; padding: 15px 30px; background: #4CAF50; color: white; text-decoration: none; border-radius: 25px; font-weight: bold; margin: 10px; transition: transform 0.2s; }
-        .btn:hover { transform: translateY(-2px); }
-        .btn-secondary { background: #2196F3; }
-      </style>
-    </head>
-    <body>
-      <div class="container">
-        <div class="hero">
-          <h1>Business Chatbot System</h1>
-          <p>Create intelligent chatbots with file uploads, lead capture, and analytics</p>
+    /* Subtle noise overlay for texture */
+    .noise { position: fixed; inset: 0; pointer-events: none; opacity: .05; z-index: 0; background-image: url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="140" height="140" viewBox="0 0 140 140"><filter id="n"><feTurbulence type="fractalNoise" baseFrequency="0.9" numOctaves="2" stitchTiles="stitch"/></filter><rect width="100%" height="100%" filter="url(%23n)" opacity="0.5"/></svg>'); mix-blend-mode: soft-light; }
+
+    /* Navigation */
+    .nav {
+      position: sticky; top: 0; z-index: 100; backdrop-filter: saturate(140%) blur(10px);
+      background: linear-gradient(180deg, rgba(10, 12, 28, .6), rgba(10, 12, 28, 0));
+      border-bottom: 1px solid rgba(255,255,255,0.06);
+    }
+    .nav-inner { max-width: 1200px; margin: 0 auto; padding: 16px 20px; display: flex; align-items: center; justify-content: space-between; }
+    .brand { display: flex; gap: 12px; align-items: center; text-decoration: none; color: var(--text); }
+    .brand-logo { width: 36px; height: 36px; border-radius: 10px; background: linear-gradient(135deg, var(--brand-1), var(--brand-2)); box-shadow: var(--shadow-1); position: relative; }
+    .brand-logo::after { content: ""; position: absolute; inset: 2px; border-radius: 8px; background: radial-gradient(circle at 30% 30%, rgba(255,255,255,.55), transparent 40%); mix-blend-mode: screen; }
+    .brand-name { font-weight: 800; letter-spacing: .2px; }
+
+    .nav-cta { display: flex; gap: 10px; align-items: center; }
+    .btn { --pad: 12px 18px; padding: var(--pad); border-radius: 999px; border: 1px solid rgba(255,255,255,0.12); color: var(--text); background: var(--card); text-decoration: none; font-weight: 600; display: inline-flex; align-items: center; gap: 10px; transition: transform .15s ease, background .2s ease, border-color .2s ease; }
+    .btn:hover { transform: translateY(-1px); background: var(--card-hover); border-color: rgba(255,255,255,0.18); }
+    .btn-primary { background: linear-gradient(90deg, var(--brand-1), var(--brand-2)); border: none; color: #0b1020; }
+    .btn-primary:hover { filter: saturate(110%); }
+    .theme-toggle { cursor: pointer; border: none; background: var(--card); color: var(--text); padding: 10px 12px; border-radius: 999px; display: inline-flex; align-items: center; gap: 8px; }
+
+    /* Layout */
+    .container { max-width: 1200px; margin: 0 auto; padding: 0 20px; position: relative; z-index: 1; }
+
+    /* Hero */
+    .hero { padding: 88px 0 36px; text-align: center; }
+    .headline { font-size: clamp(34px, 5vw, 62px); line-height: 1.05; font-weight: 900; letter-spacing: -0.02em; margin: 8px auto 14px; max-width: 980px; }
+    .headline .grad { background: linear-gradient(90deg, var(--brand-2), var(--brand-1)); -webkit-background-clip: text; background-clip: text; color: transparent; }
+    .sub { font-size: clamp(16px, 2vw, 20px); color: var(--muted); max-width: 760px; margin: 0 auto 26px; }
+
+    .cta-row { display: flex; gap: 12px; justify-content: center; align-items: center; flex-wrap: wrap; margin-top: 26px; }
+    .pill { display: inline-flex; gap: 8px; align-items: center; font-size: 14px; padding: 8px 12px; border-radius: 999px; background: rgba(0,212,255,0.1); border: 1px solid rgba(0,212,255,0.25); color: var(--text); }
+
+    /* Product mock card */
+    .demo { margin: 48px auto 0; display: grid; grid-template-columns: 1.15fr .85fr; gap: 26px; align-items: center; }
+    @media (max-width: 1000px){ .demo { grid-template-columns: 1fr; } }
+
+    .glass-card { background: var(--card); border: 1px solid rgba(255,255,255,0.08); border-radius: var(--radius); box-shadow: var(--shadow-1); overflow: hidden; position: relative; isolation: isolate; }
+    .glass-card::before { content: ""; position: absolute; inset: -30%; background: radial-gradient(600px 300px at 0% 0%, rgba(124,77,255,0.35), transparent 60%), radial-gradient(500px 260px at 120% 100%, rgba(0,212,255,0.35), transparent 60%); filter: blur(40px); opacity: .4; z-index: -1; }
+    .card-header { display: flex; align-items: center; gap: 10px; padding: 14px 16px; border-bottom: 1px solid rgba(255,255,255,0.06); }
+    .dot { width: 10px; height: 10px; border-radius: 50%; background: #ff5f57; box-shadow: 18px 0 0 #febc2e, 36px 0 0 #28c840; opacity: .9; }
+    .chat { padding: 18px; display: grid; gap: 14px; max-height: 380px; overflow: auto; scroll-behavior: smooth; }
+    .msg { display: grid; gap: 6px; align-items: start; grid-template-columns: 36px 1fr; }
+    .avatar { width: 36px; height: 36px; border-radius: 10px; background: linear-gradient(135deg, var(--brand-1), var(--brand-2)); }
+    .bubble { background: rgba(255,255,255,0.06); border: 1px solid rgba(255,255,255,0.08); padding: 12px 14px; border-radius: 14px; }
+    .bubble.user { background: rgba(0, 212, 255, 0.12); border-color: rgba(0, 212, 255, 0.2); }
+
+    .stat { display: grid; grid-template-columns: auto 1fr; gap: 10px; align-items: center; padding: 14px 16px; border-top: 1px dashed rgba(255,255,255,0.08); }
+    .stat strong { font-size: 22px; letter-spacing: .2px; }
+    .spark { width: 100%; height: 54px; }
+
+    /* Features */
+    section.features { padding: 70px 0 20px; }
+    .grid { display: grid; grid-template-columns: repeat(12, 1fr); gap: 22px; }
+    .col-4 { grid-column: span 4; }
+    .col-6 { grid-column: span 6; }
+    @media (max-width: 1000px) { .col-4, .col-6 { grid-column: span 12; } }
+
+    .feature { padding: 20px; border-radius: var(--radius); background: var(--card); border: 1px solid rgba(255,255,255,.08); transition: transform .18s ease, background .2s ease; position: relative; overflow: hidden; }
+    .feature:hover { transform: translateY(-2px); background: var(--card-hover); }
+    .feature .icon { width: 42px; height: 42px; border-radius: 12px; display: grid; place-items: center; background: linear-gradient(135deg, var(--brand-2), var(--brand-1)); color: #0b1020; font-weight: 800; }
+
+    /* Timeline */
+    .steps { padding: 70px 0; }
+    .timeline { position: relative; margin: 0 auto; max-width: 900px; }
+    .timeline::before { content: ""; position: absolute; left: 24px; top: 0; bottom: 0; width: 2px; background: linear-gradient(180deg, var(--brand-2), var(--brand-1)); opacity: .4; }
+    .step { display: grid; grid-template-columns: 48px 1fr; gap: 18px; padding: 16px 0; }
+    .step .num { width: 48px; height: 48px; border-radius: 12px; display: grid; place-items: center; font-weight: 800; background: linear-gradient(135deg, var(--brand-1), var(--brand-2)); color: #0b1020; box-shadow: var(--shadow-1); }
+    .step h4 { margin: 4px 0 6px; font-size: 18px; }
+    .step p { margin: 0; color: var(--muted); }
+
+    /* Callout */
+    .callout { margin: 70px 0; padding: 22px; border-radius: var(--radius); background: linear-gradient(90deg, rgba(124,77,255,.16), rgba(0,212,255,.14)); border: 1px solid rgba(255,255,255,.12); display: flex; align-items: center; gap: 18px; flex-wrap: wrap; justify-content: space-between; }
+
+    /* Footer */
+    footer { padding: 50px 0; color: var(--muted); border-top: 1px solid rgba(255,255,255,.06); }
+    .links { display: flex; gap: 16px; flex-wrap: wrap; }
+    .links a { color: var(--muted); text-decoration: none; border-bottom: 1px dashed transparent; }
+    .links a:hover { border-color: var(--muted); }
+
+    /* Reveal on scroll */
+    .reveal { opacity: 0; transform: translateY(12px); transition: opacity .6s ease, transform .6s ease; }
+    .reveal.show { opacity: 1; transform: translateY(0); }
+
+    /* Reduce motion */
+    @media (prefers-reduced-motion: reduce) {
+      .aurora { animation: none; }
+      .reveal { transition: none; opacity: 1; transform: none; }
+    }
+  </style>
+</head>
+<body>
+  <div class="aurora" aria-hidden="true"></div>
+  <div class="noise" aria-hidden="true"></div>
+
+  <!-- Nav -->
+  <nav class="nav" role="navigation">
+    <div class="nav-inner">
+      <a class="brand" href="#" aria-label="Business Chatbot home">
+        <div class="brand-logo" aria-hidden="true"></div>
+        <div class="brand-name">Business Chatbot</div>
+      </a>
+      <div class="nav-cta">
+        <button class="theme-toggle" id="themeToggle" aria-label="Toggle theme">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true"><path d="M12 3a1 1 0 0 1 1 1v1a1 1 0 1 1-2 0V4a1 1 0 0 1 1-1Zm0 15a4 4 0 1 0 0-8 4 4 0 0 0 0 8Zm8-5a1 1 0 0 1 1 1 1 1 0 1 1-1-1Zm-8 8a1 1 0 0 1 1-1h0a1 1 0 1 1-1 1ZM4 12a1 1 0 1 1-2 0 1 1 0 0 1 2 0Zm.64-6.36a1 1 0 0 1 1.41 0l.71.71a1 1 0 1 1-1.41 1.41l-.71-.71a1 1 0 0 1 0-1.41Zm13.3 0a1 1 0 0 1 0 1.41l-.71.71a1 1 0 1 1-1.41-1.41l.71-.71a1 1 0 0 1 1.41 0ZM5.34 18.36a1 1 0 0 1 0-1.41l.71-.71a1 1 0 0 1 1.41 1.41l-.71.71a1 1 0 0 1-1.41 0Zm12.02-2.12.71.71a1 1 0 1 1-1.41 1.41l-.71-.71a1 1 0 0 1 1.41-1.41Z" fill="currentColor"/></svg>
+          Theme
+        </button>
+        <a class="btn" href="#features">Features</a>
+        <a class="btn btn-primary" href="/admin">Create Bot</a>
+      </div>
+    </div>
+  </nav>
+
+  <!-- Hero -->
+  <header class="hero container">
+    <span class="pill" aria-label="Runtime‑ready">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true"><path d="M20 7 9 18l-5-5" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      Ready for production
+    </span>
+    <h1 class="headline reveal">Build <span class="grad">sleek, smart</span> business chatbots from your files.</h1>
+    <p class="sub reveal">Upload PDFs, spreadsheets, and docs. Capture leads. Share secure hash links for chat and analytics. All wrapped in a fast, modern experience.</p>
+    <div class="cta-row reveal">
+      <a class="btn btn-primary" href="/admin">Create Bot</a>
+      <a class="btn" href="#how">See how it works</a>
+    </div>
+
+    <div class="demo reveal" aria-label="Product preview">
+      <!-- Chat Preview -->
+      <section class="glass-card" aria-label="AI chat demo">
+        <div class="card-header">
+          <div class="dot" aria-hidden="true"></div>
+          <strong>Chat</strong>
         </div>
-        <div class="features">
-          <div class="feature">
-            <h3>📄 File Upload Support</h3>
-            <p>Upload PDFs, Excel, CSV, Word files. AI processes and learns from your content automatically.</p>
+        <div class="chat" id="chatDemo">
+          <div class="msg">
+            <div class="avatar"></div>
+            <div class="bubble">Hi! Ask me anything about Acme Co. I’ve learned from your uploaded docs.</div>
           </div>
-          <div class="feature">
-            <h3>🔐 Secure Hash URLs</h3>
-            <p>Each business gets secure hash-based URLs for chat and analytics instead of predictable slugs.</p>
+          <div class="msg">
+            <div class="avatar" style="background:linear-gradient(135deg,#00d4ff,#7c4dff);"></div>
+            <div class="bubble user">What are your support hours?</div>
           </div>
-          <div class="feature">
-            <h3>🎯 Lead Generation</h3>
-            <p>Automatic lead capture with contact forms and instant email notifications.</p>
-          </div>
-          <div class="feature">
-            <h3>📊 Separate Analytics</h3>
-            <p>Dedicated analytics dashboard with unique URLs you can share with businesses.</p>
+          <div class="msg">
+            <div class="avatar"></div>
+            <div class="bubble">We’re available Monday–Friday, 9am–5pm. Need a callback?</div>
           </div>
         </div>
-        <div class="cta">
-          <a href="/admin" class="btn">Create Bot</a>
+        <div class="stat">
+          <div style="width:42px;height:42px;border-radius:12px;display:grid;place-items:center;background:linear-gradient(135deg,var(--brand-2),var(--brand-1));color:#0b1020;font-weight:800">⚡︎</div>
+          <div>
+            <div style="font-size:12px;color:var(--muted);text-transform:uppercase;letter-spacing:.12em">Avg. response</div>
+            <strong id="ms">128ms</strong>
+          </div>
+        </div>
+      </section>
+
+      <!-- Metrics Preview -->
+      <section class="glass-card" aria-label="Analytics preview">
+        <div class="card-header">
+          <div class="dot" aria-hidden="true"></div>
+          <strong>Analytics</strong>
+        </div>
+        <canvas class="spark" id="spark"></canvas>
+        <div class="stat">
+          <div style="width:42px;height:42px;border-radius:12px;display:grid;place-items:center;background:linear-gradient(135deg,#30d158,#00d4ff);color:#0b1020;font-weight:800">↑</div>
+          <div>
+            <div style="font-size:12px;color:var(--muted);text-transform:uppercase;letter-spacing:.12em">30‑day engagement</div>
+            <strong id="engage">+142%</strong>
+          </div>
+        </div>
+      </section>
+    </div>
+  </header>
+
+  <!-- Features -->
+  <section id="features" class="features container">
+    <div class="grid">
+      <div class="col-4 reveal">
+        <div class="feature">
+          <div class="icon">📄</div>
+          <h3>Multi‑format Uploads</h3>
+          <p class="sub">PDF, CSV, TXT, DOCX, XLS, XLSX. Content is chunked and embedded with parallel processing for speed.</p>
         </div>
       </div>
-    </body>
-    </html>
-  `);
-});
+      <div class="col-4 reveal">
+        <div class="feature">
+          <div class="icon">🔐</div>
+          <h3>Secure Hash Links</h3>
+          <p class="sub">Unique chat and analytics URLs per business; no guessable slugs. Simple to share, safe by default.</p>
+        </div>
+      </div>
+      <div class="col-4 reveal">
+        <div class="feature">
+          <div class="icon">🎯</div>
+          <h3>Built‑in Lead Capture</h3>
+          <p class="sub">Convert conversations into contacts with a lightweight form and optional notifications.</p>
+        </div>
+      </div>
+      <div class="col-6 reveal">
+        <div class="feature">
+          <div class="icon">📊</div>
+          <h3>Analytics that Matter</h3>
+          <p class="sub">Monitor conversations, sessions, and conversions over time via dedicated dashboards.</p>
+        </div>
+      </div>
+      <div class="col-6 reveal">
+        <div class="feature">
+          <div class="icon">⚡️</div>
+          <h3>App‑Runner Friendly</h3>
+          <p class="sub">Predictable temp storage (<code>/tmp/uploads</code>) and parallel chunking keep requests under 120s.</p>
+        </div>
+      </div>
+    </div>
+  </section>
 
-// Health check endpoint
-app.get('/health', (req, res) => {
-  res.json({ status: 'healthy', timestamp: new Date().toISOString(), uptime: process.uptime() });
-});
+  <!-- How it works -->
+  <section id="how" class="steps container">
+    <div class="timeline">
+      <div class="step reveal">
+        <div class="num">1</div>
+        <div>
+          <h4>Create your bot</h4>
+          <p>Head to <strong>/admin</strong> and fill in your business details. You’ll get secure chat & analytics URLs instantly.</p>
+        </div>
+      </div>
+      <div class="step reveal">
+        <div class="num">2</div>
+        <div>
+          <h4>Upload files</h4>
+          <p>Drop PDFs, spreadsheets, and docs. We parse, chunk, and embed in parallel for fast, relevant retrieval.</p>
+        </div>
+      </div>
+      <div class="step reveal">
+        <div class="num">3</div>
+        <div>
+          <h4>Share & convert</h4>
+          <p>Share your chat link, answer questions, and capture leads. Track performance on the analytics page.</p>
+        </div>
+      </div>
+    </div>
+  </section>
 
-// Public: Get business information by chat hash
-app.get('/api/business/:chatHash', async (req, res) => {
-  try {
-    const business = await getBusinessByChatHash(req.params.chatHash);
-    if (!business) {
-      return res.status(404).json({ error: 'Business not found' });
-    }
-    const publicInfo = {
-      name: business.name,
-      description: business.description,
-      phone: business.phone,
-      email: business.email,
-      address: business.address,
-      website: business.website,
-      hours: business.hours,
-      maps_url: business.maps_url,
-      logo_url: business.logo_url,
-      primary_color: business.primary_color,
-      secondary_color: business.secondary_color,
-      welcome_message: business.welcome_message,
-    };
-    res.json(publicInfo);
-  } catch (error) {
-    res.status(500).json({ error: 'Internal server error' });
-  }
-});
+  <!-- Callout -->
+  <div class="container">
+    <div class="callout reveal" role="region" aria-label="Quick links">
+      <div style="display:flex;gap:12px;align-items:center;flex-wrap:wrap">
+        <div class="icon" style="width:42px;height:42px;border-radius:12px;display:grid;place-items:center;background:linear-gradient(135deg,var(--brand-1),var(--brand-2));color:#0b1020;font-weight:800">🚀</div>
+        <div>
+          <div style="font-weight:700;">Spin up your bot in minutes</div>
+          <div class="sub">Diagnostics included for peace of mind.</div>
+        </div>
+      </div>
+      <div style="display:flex;gap:10px;flex-wrap:wrap">
+        <a class="btn" href="/debug/test-openai">Test OpenAI</a>
+        <a class="btn" href="/debug/test-dynamodb">Test DynamoDB</a>
+        <a class="btn" href="/health">Health</a>
+        <a class="btn btn-primary" href="/admin">Create Bot</a>
+      </div>
+    </div>
+  </div>
 
-// Public: Initialize chat session
-app.post('/api/chat/init', async (req, res) => {
-  try {
-    const { chatHash } = req.body;
-    const business = await getBusinessByChatHash(chatHash);
-    if (!business) {
-      return res.status(404).json({ error: 'Business not found' });
-    }
-    const userIp = req.ip || req.connection.remoteAddress;
-    const userAgent = req.get('User-Agent') || '';
-    const sessionId = await createSession(business.id, userIp, userAgent);
-    const token = createSessionToken(business.id, sessionId);
-    res.json({
-      sessionToken: token,
-      business: {
-        name: business.name,
-        welcomeMessage: business.welcome_message,
-        primaryColor: business.primary_color,
-      },
+  <!-- Footer -->
+  <footer class="container">
+    <div class="links">
+      <span>© <span id="year"></span> Business Chatbot</span> ·
+      <a href="/admin">Admin</a>
+      <a href="/chat/example" aria-disabled="true" onclick="return false">Live Chat (demo)</a>
+      <a href="#features">Features</a>
+      <a href="#how">How it works</a>
+    </div>
+  </footer>
+
+  <script>
+    // Theme toggle with persistence
+    const root = document.documentElement;
+    const savedTheme = localStorage.getItem('theme');
+    if (savedTheme === 'light') root.classList.add('light');
+    document.getElementById('themeToggle').addEventListener('click', () => {
+      root.classList.toggle('light');
+      localStorage.setItem('theme', root.classList.contains('light') ? 'light' : 'dark');
     });
-  } catch (error) {
-    res.status(500).json({ error: 'Failed to initialize chat session' });
-  }
-});
 
-// Public: Send message within a chat session
-app.post('/api/chat/message', verifySessionToken, async (req, res) => {
-  try {
-    const { message } = req.body;
-    const { businessId, sessionId } = req.session;
-    if (!message || message.trim().length === 0) {
-      return res.status(400).json({ error: 'Message cannot be empty' });
-    }
-    const business = await getBusinessById(businessId);
-    if (!business) {
-      return res.status(404).json({ error: 'Business not found' });
-    }
-    const intent = aiSystem.analyzeIntent(message);
-    const sentiment = aiSystem.analyzeSentiment(message);
-    const relevantChunks = await aiSystem.retrieveRelevantChunks(businessId, message);
-    const history = await getSessionHistory(sessionId, 6);
-    const aiResponse = await aiSystem.generateResponse(business, message, history, relevantChunks);
-    await saveMessage(sessionId, businessId, 'user', message, intent, sentiment, 0.8, relevantChunks.map(c => c.id));
-    await saveMessage(sessionId, businessId, 'assistant', aiResponse);
-    const suggestions = aiSystem.generateSuggestions(intent, business);
-    const showContactForm = aiSystem.shouldShowContactForm(intent, message);
-    res.json({ response: aiResponse, suggestions, showContactForm, intent, sentiment });
-  } catch (error) {
-    res.status(500).json({
-      response: "I'm sorry, I'm having technical difficulties. Please try again or contact us directly.",
-      suggestions: ['Try again', 'Contact us', 'Get help'],
-    });
-  }
-});
+    // Reveal on scroll
+    const io = new IntersectionObserver((entries) => {
+      entries.forEach(e => { if (e.isIntersecting) e.target.classList.add('show'); });
+    }, { threshold: 0.08 });
+    document.querySelectorAll('.reveal').forEach(el => io.observe(el));
 
-// Public: Lead capture
-app.post('/api/lead/capture', verifySessionToken, async (req, res) => {
-  try {
-    const { name, email, phone, interest, budget, timeline, message } = req.body;
-    const { businessId, sessionId } = req.session;
-    if (!name || !email) {
-      return res.status(400).json({ error: 'Name and email are required' });
-    }
-    const business = await getBusinessById(businessId);
-    if (!business) {
-      return res.status(404).json({ error: 'Business not found' });
-    }
-    const leadData = { name, email, phone, interest, budget, timeline, message };
-    const leadId = await createLead(businessId, sessionId, leadData);
-    await updateSession(sessionId, {
-      user_name: name,
-      user_email: email,
-      user_phone: phone || '',
-    });
-    res.json({ success: true, leadId, message: `Thank you ${name}! We've received your information and will get back to you soon.` });
-  } catch (error) {
-    res.status(500).json({ error: 'Failed to save your information. Please try again.' });
-  }
-});
+    // Dynamic year
+    document.getElementById('year').textContent = new Date().getFullYear();
 
-// Public: Analytics API by hash
-app.get('/api/analytics/:analyticsHash', async (req, res) => {
-  try {
-    const { analyticsHash } = req.params;
-    const { days = 30 } = req.query;
-    const business = await getBusinessByAnalyticsHash(analyticsHash);
-    if (!business) {
-      return res.status(404).json({ error: 'Analytics not found' });
-    }
-    const analytics = await getBusinessAnalytics(business.id, parseInt(days, 10));
-    res.json({ business: { name: business.name, chat_hash: business.chat_hash }, period: `${days} days`, analytics });
-  } catch (error) {
-    res.status(500).json({ error: 'Failed to fetch analytics' });
-  }
-});
+    // Tiny sparkline chart (no deps)
+    (function sparkline(){
+      const c = document.getElementById('spark');
+      const dpr = window.devicePixelRatio || 1;
+      const w = c.clientWidth, h = c.clientHeight; c.width = w * dpr; c.height = h * dpr; const ctx = c.getContext('2d'); ctx.scale(dpr, dpr);
+      const pts = Array.from({length: 40}, (_,i) => {
+        const t = i/39; return [t*w, h*0.6 - Math.sin(t*3.2 + 0.5)*h*0.22 - Math.random()*8];
+      });
+      // gradient stroke
+      const g = ctx.createLinearGradient(0,0,w,0); g.addColorStop(0,'#00d4ff'); g.addColorStop(1,'#7c4dff');
+      ctx.lineWidth = 2; ctx.strokeStyle = g; ctx.beginPath();
+      pts.forEach(([x,y],i)=> i? ctx.lineTo(x,y): ctx.moveTo(x,y)); ctx.stroke();
+      // fill area
+      const y0 = h-2; ctx.lineTo(w,y0); ctx.lineTo(0,y0); ctx.closePath();
+      ctx.fillStyle = 'rgba(124,77,255,0.12)'; ctx.fill();
+    })();
 
-// Admin: Combined create business + upload files (FIXED FOR TIMEOUTS)
-app.post('/admin/business/create-and-upload', upload.array('files', 10), async (req, res) => {
-  console.log('🚀 CREATE-AND-UPLOAD endpoint hit');
-  console.log('📋 Request body keys:', Object.keys(req.body));
-  console.log('📁 Files count:', req.files?.length || 0);
-  try {
-    // Parse business data from either JSON field or individual fields
-    let businessData;
-    if (req.body.businessData) {
-      try {
-        businessData = JSON.parse(req.body.businessData);
-      } catch (jsonErr) {
-        return res.status(400).json({ error: 'Invalid JSON in businessData field' });
-      }
-    } else {
-      // Fall back to reading individual fields (useful for curl -F commands)
-      businessData = {
-        name: req.body.name,
-        slug: req.body.slug,
-        email: req.body.email,
-        description: req.body.description,
-        phone: req.body.phone,
-        address: req.body.address,
-        website: req.body.website,
-        hours: req.body.hours,
-        maps_url: req.body.maps_url,
-        logo_url: req.body.logo_url,
-        primary_color: req.body.primary_color,
-        secondary_color: req.body.secondary_color,
-        welcome_message: req.body.welcome_message,
-        system_prompt: req.body.system_prompt,
-        enable_email_notifications: req.body.enable_email_notifications === 'true' || req.body.enable_email_notifications === true,
-        enable_lead_capture: req.body.enable_lead_capture === 'true' || req.body.enable_lead_capture === true,
-        enable_file_uploads: req.body.enable_file_uploads === 'true' || req.body.enable_file_uploads === true,
-      };
-    }
-    if (!businessData.slug || !businessData.name) {
-      console.log('❌ Missing required fields');
-      return res.status(400).json({ error: 'Business slug and name are required' });
-    }
-    // Check if slug exists
-    const existing = await getBusinessBySlug(businessData.slug);
-    if (existing) {
-      return res.status(409).json({ error: 'Business slug already exists' });
-    }
-    // Create the business
-    console.log('💾 About to create business in DynamoDB...');
-    const result = await createBusiness(businessData);
-    console.log('✅ Business created successfully');
-    const business = await getBusinessById(result.id);
-    // Build base URL for returned links
-    const protocol = req.headers['x-forwarded-proto'] || req.protocol;
-    const host = process.env.CUSTOM_DOMAIN || req.get('host'); // ← Use custom domain if set
-    const baseUrl = `${protocol}://${host}`;
-    // Process uploaded files with PARALLEL PROCESSING TO PREVENT TIMEOUTS
-    let uploadResults = [];
-    let totalChunks = 0;
-    if (req.files && req.files.length > 0) {
-      console.log(`📁 Processing ${req.files.length} files with parallel optimization...`);
-      for (const file of req.files) {
-        try {
-          console.log(`📄 Processing file: ${file.originalname}`);
-          const fileExt = path.extname(file.originalname).slice(1).toLowerCase();
-          const content = await FileProcessor.processFile(file.path, fileExt, file.originalname);
-          const category = FileProcessor.categorizeContent(content, file.originalname);
-          const documentId = await saveDocument(
-            business.id,
-            file.filename,
-            file.originalname,
-            file.mimetype,
-            file.size,
-            content,
-            category,
-          );
+    // Fun: fake response time counter animation
+    (function counter(){
+      const el = document.getElementById('ms');
+      let v = 240; const target = 128; const step = () => { v -= Math.max(1, Math.round((v-target)/12)); el.textContent = v+"ms"; if (v>target) requestAnimationFrame(step); }; step();
+    })();
 
-          // FIXED: PARALLEL CHUNK PROCESSING TO PREVENT TIMEOUTS
-          const chunks = FileProcessor.chunkText(content);
-          let chunkCount = 0;
-          
-          console.log(`🔄 Processing ${chunks.length} chunks for ${file.originalname}...`);
-          
-          // Limit chunks to prevent timeout (adjust based on your needs)
-          const MAX_CHUNKS = 30; // Process max 30 chunks per file to stay under timeout
-          const limitedChunks = chunks.slice(0, MAX_CHUNKS);
-          
-          if (chunks.length > MAX_CHUNKS) {
-            console.log(`⚠️ Limiting to first ${MAX_CHUNKS} chunks (was ${chunks.length}) for ${file.originalname}`);
-          }
-          
-          // Process chunks in parallel batches
-          const BATCH_SIZE = 5; // Process 5 chunks simultaneously
-          
-          for (let i = 0; i < limitedChunks.length; i += BATCH_SIZE) {
-            const batch = limitedChunks.slice(i, i + BATCH_SIZE);
-            const batchNum = Math.floor(i / BATCH_SIZE) + 1;
-            const totalBatches = Math.ceil(limitedChunks.length / BATCH_SIZE);
-            
-            console.log(`📦 Processing batch ${batchNum}/${totalBatches} (${batch.length} chunks) for ${file.originalname}`);
-            
-            // Create promises for parallel processing
-            const batchPromises = batch.map(async (chunk, batchIndex) => {
-              const chunkIndex = i + batchIndex;
-              const keywords = FileProcessor.extractKeywords(chunk);
-              
-              try {
-                // Add timeout protection to OpenAI call
-                const embedding = await Promise.race([
-                  aiSystem.createEmbedding(chunk),
-                  new Promise((_, reject) => 
-                    setTimeout(() => reject(new Error('Embedding timeout after 15s')), 15000)
-                  )
-                ]);
-                
-                await saveChunk(business.id, documentId, chunkIndex, chunk, embedding, category, keywords);
-                return { success: true, chunkIndex };
-              } catch (embeddingError) {
-                console.error(`❌ Chunk ${chunkIndex} failed for ${file.originalname}:`, embeddingError.message);
-                return { success: false, chunkIndex, error: embeddingError.message };
-              }
-            });
-            
-            // Wait for the entire batch to complete
-            try {
-              const batchResults = await Promise.allSettled(batchPromises);
-              const successCount = batchResults.filter(
-                r => r.status === 'fulfilled' && r.value.success
-              ).length;
-              chunkCount += successCount;
-              
-              console.log(`✅ Batch ${batchNum} completed: ${successCount}/${batch.length} successful for ${file.originalname}`);
-              
-              // Small delay between batches to avoid rate limits
-              if (i + BATCH_SIZE < limitedChunks.length) {
-                await new Promise(resolve => setTimeout(resolve, 200));
-              }
-            } catch (batchError) {
-              console.error(`❌ Batch ${batchNum} error for ${file.originalname}:`, batchError);
-            }
-          }
-          
-          console.log(`✅ File processing completed: ${chunkCount}/${limitedChunks.length} chunks saved for ${file.originalname}`);
-
-          uploadResults.push({
-            filename: file.originalname,
-            status: 'success',
-            chunks: chunkCount,
-            totalChunksInFile: chunks.length,
-            processedChunks: limitedChunks.length,
-            category,
-            size: file.size,
-          });
-          totalChunks += chunkCount;
-        } catch (fileError) {
-          console.error(`Error processing file ${file.originalname}:`, fileError);
-          uploadResults.push({ filename: file.originalname, status: 'error', error: fileError.message });
-        } finally {
-          // Remove the temp file
-          await fs.unlink(file.path).catch(() => {});
-        }
-      }
-    }
-    console.log('✅ All files processed successfully');
-    res.json({
-      success: true,
-      business,
-      urls: {
-        chatUrl: `${baseUrl}/chat/${result.chat_hash}`,
-        analyticsUrl: `${baseUrl}/analytics/${result.analytics_hash}`,
-        adminUrl: `${baseUrl}/admin`,
-      },
-      apiKey: result.api_key,
-      upload: {
-        filesProcessed: uploadResults.filter(r => r.status === 'success').length,
-        totalFiles: uploadResults.length,
-        totalChunks,
-        results: uploadResults,
-      },
-    });
-  } catch (error) {
-    console.error('💥 ENDPOINT ERROR:', error);
-    console.error('💥 ERROR STACK:', error.stack);
-    res.status(500).json({ error: 'Failed to create business and process files' });
-  }
-});
-
-// Serve analytics and chat interfaces
-app.get('/analytics/:analyticsHash', (req, res) => {
-  res.sendFile(path.resolve(__dirname, 'admin/analytics.html'));
-});
-
-app.get('/chat/:chatHash', (req, res) => {
-  res.sendFile(path.resolve(__dirname, 'public/chat.html'));
-});
-
-// Legacy admin routes for backward compatibility
-app.post('/admin/business/create', async (req, res) => {
-  try {
-    const businessData = req.body;
-    if (!businessData.slug || !businessData.name) {
-      return res.status(400).json({ error: 'Business slug and name are required' });
-    }
-    const existing = await getBusinessBySlug(businessData.slug);
-    if (existing) {
-      return res.status(409).json({ error: 'Business slug already exists' });
-    }
-    const result = await createBusiness(businessData);
-    const business = await getBusinessById(result.id);
-    const protocol = req.headers['x-forwarded-proto'] || req.protocol;
-    const host = req.get('host');
-    const baseUrl = `${protocol}://${host}`;
-    res.json({
-      success: true,
-      business,
-      urls: {
-        chatUrl: `${baseUrl}/chat/${result.chat_hash}`,
-        analyticsUrl: `${baseUrl}/analytics/${result.analytics_hash}`,
-        adminUrl: `${baseUrl}/admin`,
-      },
-      apiKey: result.api_key,
-      hashes: { chat_hash: result.chat_hash, analytics_hash: result.analytics_hash },
-    });
-  } catch (error) {
-    res.status(500).json({ error: 'Failed to create business' });
-  }
-});
-
-// List all businesses
-app.get('/admin/businesses', async (req, res) => {
-  try {
-    const businesses = await getAllBusinesses();
-    res.json(businesses);
-  } catch (error) {
-    res.status(500).json({ error: 'Failed to fetch businesses' });
-  }
-});
-
-// Multer error handler and general error handler
-app.use((error, req, res, next) => {
-  if (error instanceof multer.MulterError) {
-    if (error.code === 'LIMIT_FILE_SIZE') {
-      return res.status(400).json({ error: 'File too large. Maximum size is 10MB.' });
-    }
-    return res.status(400).json({ error: error.message });
-  }
-  // unknown error
-  console.error('Unhandled error:', error);
-  res.status(500).json({ error: 'Internal server error' });
-});
-
-// Start server
-const server = app.listen(PORT, '0.0.0.0', () => {
-  console.log(`\n🚀 Enhanced Business Chatbot System running on http://0.0.0.0:${PORT}`);
-  console.log(`📊 Admin Dashboard: http://0.0.0.0:${PORT}/admin`);
-  console.log(`⚡ Quick Setup: http://0.0.0.0:${PORT}/admin/onboard.html`);
-  console.log(`🏥 Health Check: http://0.0.0.0:${PORT}/health`);
-  console.log(`🧪 OpenAI Test: http://0.0.0.0:${PORT}/debug/test-openai`);
-  console.log(`🗃️ DynamoDB Test: http://0.0.0.0:${PORT}/debug/test-dynamodb`);
-  console.log(`\n✨ New Features:`);
-  console.log(`   🔐 Hash-based secure URLs`);
-  console.log(`   📊 Separate analytics endpoints`);
-  console.log(`   📄 Parallel chunk processing (TIMEOUT FIXED)`);
-  console.log(`   🎨 Enhanced UI with Horizon design`);
-});
-
-// Graceful shutdown
-process.on('SIGTERM', () => {
-  console.log('\n🛑 Shutting down gracefully...');
-  server.close(() => {
-    console.log('✅ Server closed');
-    process.exit(0);
-  });
-});
+    // Auto-scroll chat demo
+    (function chatScroll(){
+      const el = document.getElementById('chatDemo');
+      setTimeout(()=> el.scrollTo({top: el.scrollHeight, behavior: 'smooth'}), 600);
+    })();
+  </script>
+</body>
+</html>

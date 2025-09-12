@@ -188,7 +188,7 @@ app.get('/debug/test-dynamodb', async (req, res) => {
 // Home page with modern design - REPLACE THIS ENTIRE ROUTE HANDLER
 app.get('/', (req, res) => {
   const protocol = req.headers['x-forwarded-proto'] || req.protocol;
-  const host = req.get('host');
+  const host = process.env.CUSTOM_DOMAIN || req.get('host'); // ← Use custom domain if set
   const baseUrl = `${protocol}://${host}`;
   res.send(`<!DOCTYPE html>
 <html lang="en">
@@ -1331,7 +1331,7 @@ app.post('/admin/business/create', async (req, res) => {
     const result = await createBusiness(businessData);
     const business = await getBusinessById(result.id);
     const protocol = req.headers['x-forwarded-proto'] || req.protocol;
-    const host = req.get('host');
+    const host = process.env.CUSTOM_DOMAIN || req.get('host'); // ← Use custom domain if set
     const baseUrl = `${protocol}://${host}`;
     res.json({
       success: true,

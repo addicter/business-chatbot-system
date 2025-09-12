@@ -752,7 +752,7 @@ app.get('/', (req, res) => {
     <!-- Header -->
     <header class="header">
         <div class="header-content">
-            <div class="logo">ChatBot System</div>
+            <div class="logo">Lana AI Studios</div>
             <nav>
                 <ul class="nav-links">
                     <li><a href="#features" class="nav-link">Features</a></li>

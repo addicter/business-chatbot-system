@@ -148,6 +148,24 @@
       .aurora { animation: none; }
       .reveal { transition: none; opacity: 1; transform: none; }
     }
+  /* Business-first sections */
+    .logo-row { display:flex; gap:18px; justify-content:center; align-items:center; flex-wrap:wrap; opacity:.95; padding: 12px 0 0; }
+    .logo { padding: 8px 12px; border-radius: 12px; background: var(--card); border: 1px solid rgba(255,255,255,.08); color: var(--muted); font-weight: 700; letter-spacing: .2px; }
+
+    section.benefits { padding: 70px 0 20px; }
+    section.solutions { padding: 70px 0 20px; }
+
+    section.testimonials { padding: 70px 0; }
+    .testimonial { padding: 22px; border-radius: var(--radius); background: var(--card); border: 1px solid rgba(255,255,255,.08); }
+    .testimonial .quote { font-size: 18px; line-height: 1.5; }
+    .testimonial .author { margin-top: 10px; color: var(--muted); font-size: 14px; }
+
+    .pricing-strip { margin: 60px 0; padding: 28px; border-radius: var(--radius); background: linear-gradient(90deg, rgba(124,77,255,.16), rgba(0,212,255,.14)); border: 1px solid rgba(255,255,255,.12); display:flex; justify-content: space-between; align-items:center; gap:16px; flex-wrap:wrap; }
+
+    .faq { padding: 30px 0 70px; }
+    .faq details { background: var(--card); border: 1px solid rgba(255,255,255,.08); border-radius: var(--radius); padding: 14px 16px; margin: 12px 0; }
+    .faq summary { cursor: pointer; font-weight: 600; }
+    .faq p { color: var(--muted); margin: 10px 0 0; }
   </style>
 </head>
 <body>
@@ -166,7 +184,8 @@
           <svg width="18" height="18" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true"><path d="M12 3a1 1 0 0 1 1 1v1a1 1 0 1 1-2 0V4a1 1 0 0 1 1-1Zm0 15a4 4 0 1 0 0-8 4 4 0 0 0 0 8Zm8-5a1 1 0 0 1 1 1 1 1 0 1 1-1-1Zm-8 8a1 1 0 0 1 1-1h0a1 1 0 1 1-1 1ZM4 12a1 1 0 1 1-2 0 1 1 0 0 1 2 0Zm.64-6.36a1 1 0 0 1 1.41 0l.71.71a1 1 0 1 1-1.41 1.41l-.71-.71a1 1 0 0 1 0-1.41Zm13.3 0a1 1 0 0 1 0 1.41l-.71.71a1 1 0 1 1-1.41-1.41l.71-.71a1 1 0 0 1 1.41 0ZM5.34 18.36a1 1 0 0 1 0-1.41l.71-.71a1 1 0 0 1 1.41 1.41l-.71.71a1 1 0 0 1-1.41 0Zm12.02-2.12.71.71a1 1 0 1 1-1.41 1.41l-.71-.71a1 1 0 0 1 1.41-1.41Z" fill="currentColor"/></svg>
           Theme
         </button>
-        <a class="btn" href="#features">Features</a>
+        <a class="btn" href="#benefits">Benefits</a>
+        <a class="btn" href="#pricing">Pricing</a>
         <a class="btn btn-primary" href="/admin">Create Bot</a>
       </div>
     </div>
@@ -179,10 +198,10 @@
       Ready for production
     </span>
     <h1 class="headline reveal">Build <span class="grad">sleek, smart</span> business chatbots from your files.</h1>
-    <p class="sub reveal">Upload PDFs, spreadsheets, and docs. Capture leads. Share secure hash links for chat and analytics. All wrapped in a fast, modern experience.</p>
+    <p class="sub reveal">Turn website visitors into customers with an AI assistant trained on your business content. Share secure, branded chat links for campaigns and track impact with a simple analytics view.</p>
     <div class="cta-row reveal">
       <a class="btn btn-primary" href="/admin">Create Bot</a>
-      <a class="btn" href="#how">See how it works</a>
+      <a class="btn" href="#benefits">See benefits</a>
     </div>
 
     <div class="demo reveal" aria-label="Product preview">
@@ -231,103 +250,165 @@
         </div>
       </section>
     </div>
+    <div class="logo-row reveal" aria-label="Trusted by leading teams">
+      <span class="logo">Acme</span>
+      <span class="logo">Nimbus</span>
+      <span class="logo">Orion</span>
+      <span class="logo">Helix</span>
+      <span class="logo">Lumen</span>
+    </div>
   </header>
 
   <!-- Features -->
-  <section id="features" class="features container">
+  <section id="benefits" class="benefits container">
     <div class="grid">
       <div class="col-4 reveal">
         <div class="feature">
-          <div class="icon">📄</div>
-          <h3>Multi‑format Uploads</h3>
-          <p class="sub">PDF, CSV, TXT, DOCX, XLS, XLSX. Content is chunked and embedded with parallel processing for speed.</p>
+          <div class="icon">💬</div>
+          <h3>Instant Answers</h3>
+          <p class="sub">Reduce drop‑offs by answering visitor questions 24/7—right on your site or via a shareable link.</p>
         </div>
       </div>
       <div class="col-4 reveal">
         <div class="feature">
-          <div class="icon">🔐</div>
-          <h3>Secure Hash Links</h3>
-          <p class="sub">Unique chat and analytics URLs per business; no guessable slugs. Simple to share, safe by default.</p>
+          <div class="icon">📈</div>
+          <h3>More Leads</h3>
+          <p class="sub">Turn conversations into qualified leads with a simple, friendly form at the right moment.</p>
         </div>
       </div>
       <div class="col-4 reveal">
         <div class="feature">
-          <div class="icon">🎯</div>
-          <h3>Built‑in Lead Capture</h3>
-          <p class="sub">Convert conversations into contacts with a lightweight form and optional notifications.</p>
+          <div class="icon">🤝</div>
+          <h3>Better Customer Experience</h3>
+          <p class="sub">Consistent answers from your content keep prospects confident and moving forward.</p>
         </div>
       </div>
       <div class="col-6 reveal">
         <div class="feature">
-          <div class="icon">📊</div>
-          <h3>Analytics that Matter</h3>
-          <p class="sub">Monitor conversations, sessions, and conversions over time via dedicated dashboards.</p>
+          <div class="icon">📣</div>
+          <h3>Campaign‑Ready</h3>
+          <p class="sub">Share branded chat links in ads, emails, or QR codes and track the impact with a clean overview.</p>
         </div>
       </div>
       <div class="col-6 reveal">
         <div class="feature">
-          <div class="icon">⚡️</div>
-          <h3>App‑Runner Friendly</h3>
-          <p class="sub">Predictable temp storage (<code>/tmp/uploads</code>) and parallel chunking keep requests under 120s.</p>
+          <div class="icon">🛡️</div>
+          <h3>Trust & Compliance</h3>
+          <p class="sub">Privacy‑minded by design with clear controls for what’s shown to customers.</p>
         </div>
       </div>
     </div>
   </section>
 
   <!-- How it works -->
-  <section id="how" class="steps container">
-    <div class="timeline">
-      <div class="step reveal">
-        <div class="num">1</div>
-        <div>
-          <h4>Create your bot</h4>
-          <p>Head to <strong>/admin</strong> and fill in your business details. You’ll get secure chat & analytics URLs instantly.</p>
+  <section id="solutions" class="solutions container">
+    <div class="grid">
+      <div class="col-4 reveal">
+        <div class="feature">
+          <div class="icon">🏥</div>
+          <h3>Healthcare</h3>
+          <p class="sub">Guide patients to the right service, hours, and plans—no long waits.</p>
         </div>
       </div>
-      <div class="step reveal">
-        <div class="num">2</div>
-        <div>
-          <h4>Upload files</h4>
-          <p>Drop PDFs, spreadsheets, and docs. We parse, chunk, and embed in parallel for fast, relevant retrieval.</p>
+      <div class="col-4 reveal">
+        <div class="feature">
+          <div class="icon">🏦</div>
+          <h3>Financial Services</h3>
+          <p class="sub">Answer product questions and capture high‑intent leads with audit‑friendly records.</p>
         </div>
       </div>
-      <div class="step reveal">
-        <div class="num">3</div>
-        <div>
-          <h4>Share & convert</h4>
-          <p>Share your chat link, answer questions, and capture leads. Track performance on the analytics page.</p>
+      <div class="col-4 reveal">
+        <div class="feature">
+          <div class="icon">🏗️</div>
+          <h3>Real Estate</h3>
+          <p class="sub">Qualify buyers and schedule viewings with instant, accurate listing answers.</p>
+        </div>
+      </div>
+      <div class="col-4 reveal">
+        <div class="feature">
+          <div class="icon">🛍️</div>
+          <h3>E‑commerce</h3>
+          <p class="sub">Reduce returns and increase checkout by answering sizing, shipping, and policy questions.</p>
+        </div>
+      </div>
+      <div class="col-4 reveal">
+        <div class="feature">
+          <div class="icon">🎓</div>
+          <h3>Education</h3>
+          <p class="sub">Support admissions and learners with fast guidance across programs and deadlines.</p>
+        </div>
+      </div>
+      <div class="col-4 reveal">
+        <div class="feature">
+          <div class="icon">🔧</div>
+          <h3>B2B Services</h3>
+          <p class="sub">Turn knowledge bases into a helpful assistant that brings in meetings—not tickets.</p>
         </div>
       </div>
     </div>
   </section>
 
-  <!-- Callout -->
-  <div class="container">
-    <div class="callout reveal" role="region" aria-label="Quick links">
-      <div style="display:flex;gap:12px;align-items:center;flex-wrap:wrap">
-        <div class="icon" style="width:42px;height:42px;border-radius:12px;display:grid;place-items:center;background:linear-gradient(135deg,var(--brand-1),var(--brand-2));color:#0b1020;font-weight:800">🚀</div>
-        <div>
-          <div style="font-weight:700;">Spin up your bot in minutes</div>
-          <div class="sub">Diagnostics included for peace of mind.</div>
+  <section class="testimonials container" id="stories">
+    <div class="grid">
+      <div class="col-4 reveal">
+        <div class="testimonial">
+          <div class="quote">“Leads from our website doubled within two weeks. The assistant answers like our best rep.”</div>
+          <div class="author">— Priya K., Growth Lead</div>
         </div>
       </div>
-      <div style="display:flex;gap:10px;flex-wrap:wrap">
-        <a class="btn" href="/debug/test-openai">Test OpenAI</a>
-        <a class="btn" href="/debug/test-dynamodb">Test DynamoDB</a>
-        <a class="btn" href="/health">Health</a>
-        <a class="btn btn-primary" href="/admin">Create Bot</a>
+      <div class="col-4 reveal">
+        <div class="testimonial">
+          <div class="quote">“Customers get clarity instantly. Our sales calls are now about pricing and timelines, not basics.”</div>
+          <div class="author">— Marco D., Sales Director</div>
+        </div>
+      </div>
+      <div class="col-4 reveal">
+        <div class="testimonial">
+          <div class="quote">“Setup was fast and the experience feels on‑brand across campaigns.”</div>
+          <div class="author">— Aisha R., Marketing Manager</div>
+        </div>
       </div>
     </div>
-  </div>
+  </section>
+
+  <section id="pricing" class="container">
+    <div class="pricing-strip reveal" role="region" aria-label="Get started">
+      <div>
+        <div style="font-weight:700; font-size: 20px;">Start turning conversations into customers</div>
+        <div class="sub">Launch in minutes. Upgrade any time.</div>
+      </div>
+      <div style="display:flex;gap:10px;flex-wrap:wrap">
+        <a class="btn btn-primary" href="/admin">Get Started</a>
+        <a class="btn" href="#faq">FAQs</a>
+      </div>
+    </div>
+  </section>
+
+  <section class="faq container" id="faq">
+    <details class="reveal">
+      <summary>Can I use it without a developer?</summary>
+      <p>Yes. Upload your existing content and share your chat link—no code required.</p>
+    </details>
+    <details class="reveal">
+      <summary>Does it match my brand?</summary>
+      <p>Customize the welcome message and colors so the experience feels like yours.</p>
+    </details>
+    <details class="reveal">
+      <summary>Where does it work?</summary>
+      <p>Embed on your site, share in campaigns, or use the standalone chat link.</p>
+    </details>
+  </section>
 
   <!-- Footer -->
   <footer class="container">
     <div class="links">
       <span>© <span id="year"></span> Business Chatbot</span> ·
-      <a href="/admin">Admin</a>
-      <a href="/chat/example" aria-disabled="true" onclick="return false">Live Chat (demo)</a>
-      <a href="#features">Features</a>
-      <a href="#how">How it works</a>
+      <a href="#benefits">Benefits</a>
+      <a href="#solutions">Solutions</a>
+      <a href="#pricing">Pricing</a>
+      <a href="#faq">FAQ</a>
+      <a href="#">Privacy</a>
+      <a href="#">Terms</a>
     </div>
   </footer>
 
